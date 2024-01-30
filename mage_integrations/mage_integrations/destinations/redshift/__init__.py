@@ -168,7 +168,6 @@ WHERE TABLE_NAME = '{table_name}' AND TABLE_SCHEMA = '{schema_name}'
             # This is temp as need to know the best way to create table programmatically i will change it properly */
             commands = commands + [
                 delete_records_from_full_table,
-                drop_duplicate_records_from_temp,
                 insert_records_from_temp_table,
                 truncate_records_from_temp_table
             ]

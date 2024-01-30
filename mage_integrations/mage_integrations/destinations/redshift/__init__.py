@@ -155,7 +155,13 @@ WHERE TABLE_NAME = '{table_name}' AND TABLE_SCHEMA = '{schema_name}'
                                               f'in (SELECT {", ".join(unique_constraints_clean)} '
                                               f'from {full_table_name_temp})')
 
-            insert_records_from_temp_table = f'INSERT INTO {full_table_name} SELECT * FROM {full_table_name_temp}'
+            # insert_records_from_temp_table = f'INSERT INTO {full_table_name} SELECT * FROM {full_table_name_temp}'
+            insert_records_from_temp_table = (f'INSERT INTO {full_table_name} '
+                                              f'SELECT {insert_columns} FROM '
+                                              f'(SELECT *,ROW_NUMBER() '
+                                              f'OVER (PARTITION BY {", ".join(unique_constraints_clean)} '
+                                              f'ORDER BY _mage_created_at DESC      ) as row_num FROM '
+                                              f'{full_table_name_temp}) WHERE row_num = 1')
 
             truncate_records_from_temp_table = f'TRUNCATE table {full_table_name_temp}'
 

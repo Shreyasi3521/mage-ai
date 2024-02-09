@@ -42,6 +42,7 @@ FilePolicy.allow_write([
     'file',
     'name',
     'overwrite',
+    'pipeline_zip',
 ], scopes=[
     OauthScope.CLIENT_PRIVATE,
 ], on_action=[
@@ -63,6 +64,7 @@ FilePolicy.allow_query(
         'exclude_dir_pattern',
         'exclude_pattern',
         'flatten',
+        'include_pipeline_count',
         'pattern',
         'project_uuid',
         'repo_path',

@@ -39,8 +39,6 @@ from mage_ai.data_preparation.repo_manager import (
     init_repo,
 )
 from mage_ai.data_preparation.shared.constants import MANAGE_ENV_VAR
-from mage_ai.data_preparation.sync import GitConfig
-from mage_ai.data_preparation.sync.git_sync import GitSync
 from mage_ai.orchestration.constants import Entity
 from mage_ai.orchestration.db import db_connection, set_db_schema
 from mage_ai.orchestration.db.database_manager import database_manager
@@ -88,11 +86,13 @@ from mage_ai.settings import (
     ENABLE_PROMETHEUS,
     LDAP_ADMIN_USERNAME,
     OAUTH2_APPLICATION_CLIENT_ID,
+    OTEL_EXPORTER_OTLP_ENDPOINT,
     REDIS_URL,
     REQUESTS_BASE_PATH,
     REQUIRE_USER_AUTHENTICATION,
     REQUIRE_USER_PERMISSIONS,
     ROUTES_BASE_PATH,
+    SERVER_LOGGING_FORMAT,
     SERVER_VERBOSITY,
     SHELL_COMMAND,
     USE_UNIQUE_TERMINAL,
@@ -108,7 +108,7 @@ from mage_ai.settings.repo import (
 from mage_ai.shared.constants import ENV_VAR_INSTANCE_TYPE, InstanceType
 from mage_ai.shared.environments import is_debug
 from mage_ai.shared.io import chmod
-from mage_ai.shared.logger import LoggingLevel
+from mage_ai.shared.logger import LoggingLevel, set_logging_format
 from mage_ai.shared.utils import is_port_in_use
 from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
@@ -345,6 +345,43 @@ def make_app(template_dir: str = None, update_routes: bool = False):
         (r'/version-control', MainPageHandler),
     ]
 
+    if ENABLE_PROMETHEUS or OTEL_EXPORTER_OTLP_ENDPOINT:
+        from opentelemetry.instrumentation.tornado import TornadoInstrumentor
+        TornadoInstrumentor().instrument()
+        logger.info('OpenTelemetry instrumentation enabled.')
+
+    if OTEL_EXPORTER_OTLP_ENDPOINT:
+        logger.info(f'OTEL_EXPORTER_OTLP_ENDPOINT: {OTEL_EXPORTER_OTLP_ENDPOINT}')
+
+        from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+            OTLPSpanExporter,
+        )
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        service_name = "mage-ai-server"
+        resource = Resource(attributes={
+            "service.name": service_name,
+        })
+
+        # Set up a TracerProvider and attach an OTLP exporter to it
+        trace.set_tracer_provider(TracerProvider(resource=resource))
+        tracer_provider = trace.get_tracer_provider()
+
+        # Configure OTLP exporter
+        otlp_exporter = OTLPSpanExporter(
+            # Endpoint of your OpenTelemetry Collector
+            endpoint=OTEL_EXPORTER_OTLP_ENDPOINT,
+            # Use insecure channel if your collector does not support TLS
+            insecure=True
+        )
+
+        # Attach the OTLP exporter to the TracerProvider
+        span_processor = BatchSpanProcessor(otlp_exporter)
+        tracer_provider.add_span_processor(span_processor)
+
     if ENABLE_PROMETHEUS:
         from opentelemetry import metrics
         from opentelemetry.exporter.prometheus import PrometheusMetricReader
@@ -446,19 +483,21 @@ async def main(
     # Git sync if option is enabled
     preferences = get_preferences()
     if preferences.sync_config:
+        from mage_ai.data_preparation.sync import GitConfig
         sync_config = GitConfig.load(config=preferences.sync_config)
         if sync_config.sync_on_start:
             try:
+                from mage_ai.data_preparation.sync.git_sync import GitSync
                 sync = GitSync(sync_config)
                 sync.sync_data()
                 logger.info(
                     f'Successfully synced data from git repo: {sync_config.remote_repo_link}'
                     f', branch: {sync_config.branch}'
                 )
-            except Exception as err:
-                logger.info(
+            except Exception:
+                logger.exception(
                     f'Failed to sync data from git repo: {sync_config.remote_repo_link}'
-                    f', branch: {sync_config.branch} with error: {str(err)}'
+                    f', branch: {sync_config.branch}'
                 )
 
     if REQUIRE_USER_AUTHENTICATION:
@@ -474,13 +513,13 @@ async def main(
                 entity_id=get_project_uuid(),
                 prefix=get_repo_name(),
             )
+            default_owner_role = Role.get_role(f'{get_repo_name()}_{Role.DefaultRole.OWNER}')
         else:
             Role.create_default_roles()
+            default_owner_role = Role.get_role(Role.DefaultRole.OWNER)
 
         # Fetch legacy owner user to check if we need to batch update the users with new roles.
         legacy_owner_user = User.query.filter(User._owner == True).first()  # noqa: E712
-
-        default_owner_role = Role.get_role(Role.DefaultRole.OWNER)
         owner_users = default_owner_role.users if default_owner_role else []
         if not legacy_owner_user and len(owner_users) == 0:
             logger.info('User with owner permission doesn’t exist, creating owner user.')
@@ -631,6 +670,15 @@ def start_server(
 
     asyncio.run(UsageStatisticLogger().project_impression())
 
+    set_logging_format(
+        logging_format=SERVER_LOGGING_FORMAT,
+        level=SERVER_VERBOSITY,
+    )
+
+    if LoggingLevel.is_valid_level(SERVER_VERBOSITY):
+        options.logging = SERVER_VERBOSITY
+    enable_pretty_logging()
+
     if dbt_docs:
         run_docs_server()
     else:
@@ -659,10 +707,6 @@ def start_server(
                 traceback.print_exc()
 
         if run_web_server:
-            if LoggingLevel.is_valid_level(SERVER_VERBOSITY):
-                options.logging = SERVER_VERBOSITY
-            enable_pretty_logging()
-
             # Start web server
             asyncio.run(
                 main(

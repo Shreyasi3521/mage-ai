@@ -41,8 +41,10 @@ export function getApplicationColors(uuid: ApplicationExpansionUUIDEnum, props: 
 
   if (ApplicationExpansionUUIDEnum.ArcaneLibrary === uuid) {
     accent = (props?.theme || dark)?.accent?.purple;
-  } else {
+  } else if (ApplicationExpansionUUIDEnum.PortalTerminal === uuid) {
     accent = (props?.theme || dark)?.accent?.negative;
+  } else if (ApplicationExpansionUUIDEnum.VersionControlFileDiffs === uuid) {
+    accent = (props?.theme || dark)?.background?.success;
   }
 
   return {
@@ -353,4 +355,14 @@ export const ResizeCornerStyle = styled.div<{
       border-top: ${RESIZE_SIZE}px solid rgba(0, 0, 0, 0.3);
     }
   `}
+`;
+
+export const ButtonStyle = styled.div`
+  .emtpy {
+    display: none;
+  }
+
+  .filled {
+    display: block;
+  }
 `;

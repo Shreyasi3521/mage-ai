@@ -275,9 +275,15 @@ class PipelineScheduler:
                             schedule.schedule_interval == ScheduleInterval.ONCE:
 
                         schedule.update(status=ScheduleStatus.INACTIVE)
-            elif self.__check_pipeline_run_timeout() or \
-                    (self.pipeline_run.any_blocks_failed() and
-                     not self.allow_blocks_to_fail):
+            elif self.__check_pipeline_run_timeout():
+                status = (
+                    self.pipeline_schedule.timeout_status
+                    or PipelineRun.PipelineRunStatus.FAILED
+                )
+                self.pipeline_run.update(status=status)
+
+                self.on_pipeline_run_failure('Pipeline run timed out.')
+            elif self.pipeline_run.any_blocks_failed() and not self.allow_blocks_to_fail:
                 self.pipeline_run.update(
                     status=PipelineRun.PipelineRunStatus.FAILED)
 
@@ -295,21 +301,11 @@ class PipelineScheduler:
                             status=Backfill.Status.FAILED,
                         )
 
-                asyncio.run(UsageStatisticLogger().pipeline_run_ended(self.pipeline_run))
-
                 failed_block_runs = self.pipeline_run.failed_block_runs
-                if len(failed_block_runs) > 0:
-                    error_msg = 'Failed blocks: '\
-                                f'{", ".join([b.block_uuid for b in failed_block_runs])}.'
-                else:
-                    error_msg = 'Pipeline run timed out.'
-                self.notification_sender.send_pipeline_run_failure_message(
-                    pipeline=self.pipeline,
-                    pipeline_run=self.pipeline_run,
-                    error=error_msg,
-                )
-                # Cancel block runs that are still in progress for the pipeline run.
-                cancel_block_runs_and_jobs(self.pipeline_run, self.pipeline)
+                error_msg = 'Failed blocks: '\
+                            f'{", ".join([b.block_uuid for b in failed_block_runs])}.'
+
+                self.on_pipeline_run_failure(error_msg)
             elif PipelineType.INTEGRATION == self.pipeline.type:
                 self.__schedule_integration_streams(block_runs)
             elif self.pipeline.run_pipeline_in_one_process:
@@ -317,6 +313,17 @@ class PipelineScheduler:
             else:
                 if not self.__check_block_run_timeout():
                     self.__schedule_blocks(block_runs)
+
+    @safe_db_query
+    def on_pipeline_run_failure(self, error: str) -> None:
+        asyncio.run(UsageStatisticLogger().pipeline_run_ended(self.pipeline_run))
+        self.notification_sender.send_pipeline_run_failure_message(
+            pipeline=self.pipeline,
+            pipeline_run=self.pipeline_run,
+            error=error,
+        )
+        # Cancel block runs that are still in progress for the pipeline run.
+        cancel_block_runs_and_jobs(self.pipeline_run, self.pipeline)
 
     @safe_db_query
     def on_block_complete(
@@ -438,7 +445,7 @@ class PipelineScheduler:
             tags = dict()
         msg = 'Memory usage across all pipeline runs has reached or exceeded the maximum '\
             f'limit of {int(MEMORY_USAGE_MAXIMUM * 100)}%.'
-        self.logger.info(msg, tags=tags)
+        self.logger.info(msg, **tags)
 
         self.stop()
 
@@ -455,12 +462,15 @@ class PipelineScheduler:
                 logging_tags=tags,
             )
 
-    def build_tags(self, **kwargs):
+    def build_tags(self, block_run=None, **kwargs):
         base_tags = dict(
             pipeline_run_id=self.pipeline_run.id,
             pipeline_schedule_id=self.pipeline_run.pipeline_schedule_id,
             pipeline_uuid=self.pipeline.uuid,
         )
+        if block_run is not None:
+            base_tags['block_run_id'] = block_run.id
+            base_tags['block_uuid'] = block_run.block_uuid
         if HOSTNAME:
             base_tags['hostname'] = HOSTNAME
         return merge_dict(kwargs, base_tags)
@@ -476,7 +486,7 @@ class PipelineScheduler:
             bool: True if the pipeline run has timed out, False otherwise.
         """
         try:
-            pipeline_run_timeout = self.pipeline_run.pipeline_schedule.timeout
+            pipeline_run_timeout = self.pipeline_schedule.timeout
 
             if self.pipeline_run.started_at and pipeline_run_timeout:
                 time_difference = datetime.now(tz=pytz.UTC).timestamp() - \
@@ -655,12 +665,21 @@ class PipelineScheduler:
             parallel_streams_to_schedule = []
             for stream in parallel_streams:
                 tap_stream_id = stream.get('tap_stream_id')
-                if not job_manager.has_integration_stream_job(self.pipeline_run.id, tap_stream_id):
+                if not job_manager.has_integration_stream_job(
+                    self.pipeline_run.id,
+                    tap_stream_id,
+                    logger=self.logger,
+                    logging_tags=tags,
+                ):
                     parallel_streams_to_schedule.append(stream)
 
             # Stop scheduling if there are no streams to schedule.
-            if (not sequential_streams or job_manager.has_pipeline_run_job(self.pipeline_run.id)) \
-                    and len(parallel_streams_to_schedule) == 0:
+            if (not sequential_streams or
+                    job_manager.has_pipeline_run_job(
+                        self.pipeline_run.id,
+                        logger=self.logger,
+                        logging_tags=tags,
+                    )) and len(parallel_streams_to_schedule) == 0:
                 return
 
             # Generate global variables and runtime arguments for pipeline execution.
@@ -726,8 +745,11 @@ class PipelineScheduler:
                     variables,
                 )
 
-            if job_manager.has_pipeline_run_job(self.pipeline_run.id) or \
-                    len(sequential_streams) == 0:
+            if job_manager.has_pipeline_run_job(
+                self.pipeline_run.id,
+                logger=self.logger,
+                logging_tags=tags,
+            ) or len(sequential_streams) == 0:
                 return
 
             job_manager.add_job(
@@ -754,7 +776,11 @@ class PipelineScheduler:
         Returns:
             None
         """
-        if job_manager.has_pipeline_run_job(self.pipeline_run.id):
+        if job_manager.has_pipeline_run_job(
+            self.pipeline_run.id,
+            logger=self.logger,
+            logging_tags=self.build_tags(),
+        ):
             return
         self.logger.info(
             f'Start a process for PipelineRun {self.pipeline_run.id}',
@@ -791,7 +817,11 @@ class PipelineScheduler:
 
         crashed_runs = []
         for br in running_or_queued_block_runs:
-            if not job_manager.has_block_run_job(br.id):
+            if not job_manager.has_block_run_job(
+                    br.id,
+                    logger=self.logger,
+                    logging_tags=self.build_tags(block_run=br),
+            ):
                 br.update(status=BlockRun.BlockRunStatus.INITIAL)
                 crashed_runs.append(br)
 
@@ -820,7 +850,7 @@ class PipelineScheduler:
         )
 
         if memory_usage and memory_usage >= MEMORY_USAGE_MAXIMUM:
-            self.memory_usage_failure(tags)
+            self.memory_usage_failure(tags=tags)
 
 
 def run_integration_streams(

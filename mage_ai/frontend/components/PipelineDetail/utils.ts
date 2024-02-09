@@ -20,13 +20,57 @@ import {
 } from '@storage/localStorage';
 import { addUnderscores, isJsonString, randomNameGenerator, removeExtensionFromFilename } from '@utils/string';
 import {
+  dateFormatLong,
   dateFormatLongFromUnixTimestamp,
   datetimeInLocalTimezone,
   momentInLocalTimezone,
 } from '@utils/date';
 import { getUpstreamBlockUuids } from '@components/CodeBlock/utils';
-import { indexBy } from '@utils/array';
+import { indexBy, range } from '@utils/array';
 import { shouldDisplayLocalTimezone } from '@components/settings/workspace/utils';
+import { isEmptyObject } from '@utils/hash';
+
+function prepareOutput(output) {
+  let data;
+  let type;
+
+  if (typeof output === 'object') {
+    const {
+      sample_data: sampleData,
+      shape: shape,
+      text_data: textDataJsonString,
+    } = output || {};
+    type = output?.type;
+
+    if (sampleData) {
+      data = {
+        shape,
+        type,
+        ...sampleData,
+      };
+    } else if (textDataJsonString && isJsonString(textDataJsonString)) {
+      data = JSON.parse(textDataJsonString);
+      type = DataTypeEnum.TABLE;
+      if (isEmptyObject(data)) {
+        data = null;
+        type = DataTypeEnum.TEXT;
+      }
+    } else {
+      data = textDataJsonString;
+    }
+  } else {
+    type = DataTypeEnum.TEXT;
+    data = {
+      data: String(output),
+      type,
+    };
+  }
+
+  return {
+    data,
+    type,
+  };
+}
 
 export function initializeContentAndMessages(blocks: BlockType[]) {
   const messagesInit = {};
@@ -39,35 +83,62 @@ export function initializeContentAndMessages(blocks: BlockType[]) {
     uuid,
   }: BlockType) => {
     if (outputs?.length >= 1) {
-      messagesInit[uuid] = outputs.map((output: OutputType) => {
-        if (typeof output === 'object') {
-          const {
-            sample_data: sampleData,
-            shape: shape,
-            text_data: textDataJsonString,
+      let outputsFinal = [];
+      let multiOutput = false;
+      let outputType;
+
+      outputs.forEach((output: OutputType) => {
+        const {
+          data,
+          type,
+        } = prepareOutput(output);
+
+        multiOutput = multiOutput || output?.multi_output;
+        outputType = (!data && !outputType && outputs?.length >= 2) ? null : (outputType || type);
+
+        if (!!data || outputs?.length === 1) {
+          outputsFinal.push({
+            data,
             type,
-          } = output || {};
-
-          if (sampleData) {
-            return {
-              data: {
-                shape,
-                ...sampleData,
-              },
-              type,
-            };
-          } else if (textDataJsonString && isJsonString(textDataJsonString)) {
-            return JSON.parse(textDataJsonString);
-          }
-
-          return textDataJsonString;
-        } else {
-          return {
-            data: String(output),
-            type: DataTypeEnum.TEXT,
-          };
+          });
         }
       });
+
+      if (multiOutput) {
+        outputsFinal = [
+          {
+            data: {
+              columns: outputs?.map((output, idx) => output?.variable_uuid || `output_${idx}`),
+              index: outputs?.map((o, i) => i),
+              shape: [outputs?.length || 0, 1],
+              rows: outputsFinal,
+            },
+            type: outputType,
+            multi_output: true,
+          },
+        ];
+        // This is to display reduce output data
+      } else if (DataTypeEnum.TABLE === outputType && outputsFinal?.length >= 2 && !!outputsFinal?.[0]?.data?.text_data) {
+        const rows = outputsFinal?.map(({ data }) => data);
+        if (rows?.length >= 1) {
+          const columns = range(Math.max(...rows?.map(row => row?.length)))?.map((_, idx) => `col${idx}`);
+          const shape = [rows?.length, columns?.length];
+          const index = rows?.map((_, idx) => idx);
+          outputsFinal = [
+            {
+              data: {
+                rows,
+                columns,
+                shape,
+                index,
+              },
+              type: outputType,
+            },
+          ];
+        }
+      }
+
+      messagesInit[uuid] = outputsFinal;
     }
 
     if (!contentByBlockUUID[type]) {
@@ -182,7 +253,7 @@ export function displayPipelineLastSaved(
   const displayLocalTimezone = shouldDisplayLocalTimezone();
   const isPipelineUpdating = opts?.isPipelineUpdating;
   const pipelineContentTouched = opts?.pipelineContentTouched;
-  const pipelineLastSaved = opts?.pipelineLastSaved
+  const pipelineLastSaved = opts?.pipelineLastSaved;
 
   let saveStatus;
   if (pipelineContentTouched) {
@@ -198,7 +269,10 @@ export function displayPipelineLastSaved(
       let lastSavedDate = dateFormatLongFromUnixTimestamp(pipelineLastSaved / 1000);
 
       if (pipeline?.updated_at) {
-        lastSavedDate = datetimeInLocalTimezone(pipeline?.updated_at, displayLocalTimezone);
+        lastSavedDate = datetimeInLocalTimezone(
+          dateFormatLong(pipeline?.updated_at, { includeSeconds: true, utcFormat: true }),
+          displayLocalTimezone,
+        );
       }
       saveStatus = `Last saved ${lastSavedDate}`;
     }

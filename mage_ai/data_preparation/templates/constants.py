@@ -196,6 +196,13 @@ TEMPLATES_ONLY_FOR_V2 = [
         block_type=BlockType.DATA_LOADER,
         groups=[GROUP_DATABASES],
         language=BlockLanguage.PYTHON,
+        name='Algolia',
+        path='data_loaders/algolia.py',
+    ),
+    dict(
+        block_type=BlockType.DATA_LOADER,
+        groups=[GROUP_DATABASES],
+        language=BlockLanguage.PYTHON,
         name='Chroma',
         path='data_loaders/chroma.py',
     ),
@@ -233,6 +240,13 @@ TEMPLATES_ONLY_FOR_V2 = [
         language=BlockLanguage.PYTHON,
         name='Qdrant',
         path='data_loaders/qdrant.py',
+    ),
+    dict(
+        block_type=BlockType.DATA_LOADER,
+        groups=[GROUP_DATABASES],
+        language=BlockLanguage.PYTHON,
+        name='Weaviate',
+        path='data_loaders/weaviate.py',
     ),
     dict(
         block_type=BlockType.DATA_LOADER,
@@ -570,6 +584,13 @@ TEMPLATES_ONLY_FOR_V2 = [
         block_type=BlockType.DATA_EXPORTER,
         groups=[GROUP_DATABASES],
         language=BlockLanguage.PYTHON,
+        name='Algolia',
+        path='data_exporters/algolia.py',
+    ),
+    dict(
+        block_type=BlockType.DATA_EXPORTER,
+        groups=[GROUP_DATABASES],
+        language=BlockLanguage.PYTHON,
         name='Chroma',
         path='data_exporters/chroma.py',
     ),
@@ -600,6 +621,13 @@ TEMPLATES_ONLY_FOR_V2 = [
         language=BlockLanguage.PYTHON,
         name='Qdrant',
         path='data_exporters/qdrant.py',
+    ),
+    dict(
+        block_type=BlockType.DATA_EXPORTER,
+        groups=[GROUP_DATABASES],
+        language=BlockLanguage.PYTHON,
+        name='Weaviate',
+        path='data_exporters/weaviate.py',
     ),
     # Sensors
     dict(

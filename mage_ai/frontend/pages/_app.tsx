@@ -10,6 +10,7 @@ import LoadingBar from 'react-top-loading-bar';
 import dynamic from 'next/dynamic';
 import { GridThemeProvider } from 'styled-bootstrap-grid';
 import { ThemeProvider } from 'styled-components';
+import { createRoot } from 'react-dom/client';
 
 import 'react-toastify/dist/ReactToastify.min.css';
 import '@styles/globals.css';
@@ -21,6 +22,8 @@ import ToastWrapper from '@components/Toast/ToastWrapper';
 import api from '@api';
 import useGlobalKeyboardShortcuts from '@utils/hooks/keyboardShortcuts/useGlobalKeyboardShortcuts';
 import useProject from '@utils/models/project/useProject';
+import useStatus from '@utils/models/status/useStatus';
+import { CustomEventUUID } from '@utils/events/constants';
 import { ErrorProvider } from '@context/Error';
 import { LOCAL_STORAGE_KEY_HIDE_PUBLIC_DEMO_WARNING } from '@storage/constants';
 import { ModalProvider } from '@context/Modal';
@@ -42,6 +45,9 @@ import {
   theme as stylesTheme,
 } from '@styles/theme';
 import { queryFromUrl, queryString, redirectToUrl } from '@utils/url';
+import { COMMON_EXCLUDE_PATTERNS } from '@interfaces/FileType';
+
+const COMMAND_CENTER_ROOT_ID = 'command-center-root';
 
 const Banner = dynamic(() => import('@oracle/components/Banner'), { ssr: false });
 
@@ -61,6 +67,7 @@ type MyAppProps = {
 };
 
 function MyApp(props: MyAppProps & AppProps) {
+  const commandCenterRootRef = useRef(null);
   const refLoadingBar = useRef(null);
   const keyMapping = useRef({});
   const keyHistory = useRef([]);
@@ -132,6 +139,49 @@ function MyApp(props: MyAppProps & AppProps) {
     savePageHistory,
   ]);
 
+  useEffect(() => {
+    const handleState = () => {
+      if (!commandCenterRootRef?.current) {
+        const domNode = document.getElementById(COMMAND_CENTER_ROOT_ID);
+        commandCenterRootRef.current = createRoot(domNode);
+      }
+      if (commandCenterRootRef?.current) {
+        commandCenterRootRef?.current?.render(
+          <KeyboardContext.Provider value={keyboardContextValue}>
+            <ThemeProvider
+              theme={Object.assign(
+                stylesTheme,
+                themeProps?.currentTheme || currentTheme,
+              )}
+            >
+              <GridThemeProvider gridTheme={gridThemeDefault}>
+                <ModalProvider>
+                  <SheetProvider>
+                    <ErrorProvider>
+                      <CommandCenter router={router} />
+                    </ErrorProvider>
+                  </SheetProvider>
+                </ModalProvider>
+              </GridThemeProvider>
+            </ThemeProvider>
+          </KeyboardContext.Provider>,
+        );
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      // @ts-ignore
+      window.addEventListener(CustomEventUUID.COMMAND_CENTER_ENABLED, handleState);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        // @ts-ignore
+        window.removeEventListener(CustomEventUUID.COMMAND_CENTER_ENABLED, handleState);
+      }
+    };
+  }, []);
+
   const {
     disableGlobalKeyboardShortcuts,
     registerOnKeyDown,
@@ -176,12 +226,15 @@ function MyApp(props: MyAppProps & AppProps) {
     || valPermissions === null
     || !REQUIRE_USER_PERMISSIONS();
 
-  const { data } = api.statuses.list({}, {}, { pauseFetch: !noValue && !noValuePermissions });
+  const { status } = useStatus({
+    delay: 3000,
+    pauseFetch: !noValue && !noValuePermissions,
+  });
 
   const requireUserAuthentication =
-    useMemo(() => data?.statuses?.[0]?.require_user_authentication, [data]);
+    useMemo(() => status?.require_user_authentication, [status]);
   const requireUserPermissions =
-    useMemo(() => data?.statuses?.[0]?.require_user_permissions, [data]);
+    useMemo(() => status?.require_user_permissions, [status]);
 
   const { data: dataProjects } = api.projects.list({}, { revalidateOnFocus: false });
 
@@ -229,6 +282,12 @@ function MyApp(props: MyAppProps & AppProps) {
     windowIsDefined,
   ]);
 
+  const shouldShowCommandCenter =
+    useMemo(() => (!requireUserAuthentication || AuthToken.isLoggedIn()) && commandCenterEnabled, [
+      commandCenterEnabled,
+      requireUserAuthentication,
+    ]);
+
   return (
     <KeyboardContext.Provider value={keyboardContextValue}>
       <ThemeProvider
@@ -269,7 +328,8 @@ function MyApp(props: MyAppProps & AppProps) {
                     }}
                   />
                 )}
-                {(!requireUserAuthentication || AuthToken.isLoggedIn()) && commandCenterEnabled && <CommandCenter />}
+                {shouldShowCommandCenter && <CommandCenter />}
+                {!shouldShowCommandCenter && <div id={COMMAND_CENTER_ROOT_ID} />}
               </ErrorProvider>
             </SheetProvider>
           </ModalProvider>

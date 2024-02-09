@@ -6,13 +6,18 @@ from typing import Dict
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.BlockResource import BlockResource
 from mage_ai.api.resources.GenericResource import GenericResource
+from mage_ai.cache.block import BlockCache
 from mage_ai.cache.block_action_object import BlockActionObjectCache
 from mage_ai.data_preparation.models.block import Block
 from mage_ai.data_preparation.models.errors import (
     FileExistsError,
     FileNotInProjectError,
+    FileWriteError,
+    InvalidPipelineZipError,
+    PipelineZipTooLargeError,
 )
 from mage_ai.data_preparation.models.file import File, ensure_file_is_in_project
+from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.orchestration.db import safe_db_query
 from mage_ai.settings.repo import get_repo_path
 from mage_ai.settings.utils import base_repo_path
@@ -25,7 +30,7 @@ from mage_ai.version_control.models import Project
 class FileResource(GenericResource):
     @classmethod
     @safe_db_query
-    def collection(self, query, meta, user, **kwargs):
+    async def collection(self, query, meta, user, **kwargs):
         pattern = query.get('pattern', [None])
         if pattern:
             pattern = pattern[0]
@@ -49,6 +54,12 @@ class FileResource(GenericResource):
         project_uuid = query.get('project_uuid', [None])
         if project_uuid:
             project_uuid = project_uuid[0]
+
+        include_pipeline_count = query.get('include_pipeline_count', [False])
+        if include_pipeline_count:
+            include_pipeline_count = include_pipeline_count[0]
+        if include_pipeline_count:
+            await BlockCache.initialize_cache()
 
         exclude_dir_pattern = query.get('exclude_dir_pattern', [None])
         if exclude_dir_pattern:
@@ -109,6 +120,7 @@ class FileResource(GenericResource):
                 exclude_pattern=exclude_pattern,
                 pattern=pattern,
                 check_file_path=check_file_path,
+                include_pipeline_count=include_pipeline_count,
             )],
             user,
             **kwargs,
@@ -119,6 +131,8 @@ class FileResource(GenericResource):
     async def create(self, payload: Dict, user, **kwargs) -> 'FileResource':
         dir_path = payload['dir_path']
         repo_path = get_repo_path(root_project=True)
+        pipeline_zip = payload.get('pipeline_zip', False)
+        overwrite = payload.get('overwrite', False)
         content = None
 
         if 'file' in payload:
@@ -129,29 +143,61 @@ class FileResource(GenericResource):
             filename = payload['name']
 
         error = ApiError.RESOURCE_INVALID.copy()
-        file_path = File(filename, dir_path, repo_path).file_path
         try:
-            ensure_file_is_in_project(file_path)
-            file = await File.create_async(
-                filename,
-                dir_path,
-                repo_path=repo_path,
-                content=content,
-                overwrite=payload.get('overwrite', False),
-            )
+            if pipeline_zip:  # pipeline upload
+                pipeline_file, pipeline_config = Pipeline.import_from_zip(content, overwrite)
+                tags = pipeline_config.get('tags', [])
+                pipeline_uuid = pipeline_config.get('uuid')
+                pipeline = Pipeline(pipeline_uuid, config=pipeline_config)
+                if tags:
+                    from mage_ai.cache.tag import TagCache
 
-            block_type = Block.block_type_from_path(dir_path)
-            if block_type:
-                cache_block_action_object = await BlockActionObjectCache.initialize_cache()
-                cache_block_action_object.update_block(block_file_absolute_path=file.file_path)
+                    tag_cache = await TagCache.initialize_cache()
+                    for tag_uuid in tags:
+                        tag_cache.add_pipeline(tag_uuid, pipeline)
 
-            return self(file, user, **kwargs)
+                if pipeline.blocks_by_uuid:
+                    from mage_ai.cache.block import BlockCache
+
+                    block_cache = await BlockCache.initialize_cache()
+                    for block in pipeline.blocks_by_uuid.values():
+                        block_cache.add_pipeline(block, pipeline)
+
+                return self(pipeline_file, user, **kwargs)
+            else:
+                file_path = File(filename, dir_path, repo_path).file_path
+                ensure_file_is_in_project(file_path)
+                file = await File.create_async(
+                    filename,
+                    dir_path,
+                    repo_path=repo_path,
+                    content=content,
+                    overwrite=overwrite,
+                )
+
+                block_type = Block.block_type_from_path(dir_path)
+                if block_type:
+                    cache_block_action_object = await BlockActionObjectCache.initialize_cache()
+                    cache_block_action_object.update_block(block_file_absolute_path=file.file_path)
+
+                return self(file, user, **kwargs)
+
         except FileExistsError as err:
             error.update(dict(message=str(err)))
             raise ApiError(error)
         except FileNotInProjectError:
             error.update(dict(
                 message=f'File at path: {file_path} is not in the project directory.'))
+            raise ApiError(error)
+        except FileWriteError as err:
+            error.update(dict(message=str(err)))
+            raise ApiError(error)
+        except PipelineZipTooLargeError as err:
+            error.update(dict(message=str(err)))
+            raise ApiError(error)
+        except InvalidPipelineZipError as err:
+            error.update(dict(
+                message=f'Invalid pipeline zip {filename}. \n{str(err)}'))
             raise ApiError(error)
 
     @classmethod

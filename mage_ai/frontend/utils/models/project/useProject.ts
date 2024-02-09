@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useMutation } from 'react-query';
 
 import ProjectType, { FeatureUUIDEnum } from '@interfaces/ProjectType';
 import api from '@api';
@@ -19,13 +20,14 @@ export type UseProjectType = {
     NOTEBOOK_BLOCK_OUTPUT_SPLIT_VIEW: FeatureUUIDEnum;
     LOCAL_TIMEZONE: FeatureUUIDEnum;
     OPERATION_HISTORY: FeatureUUIDEnum;
-    PROJECT_PLATFORM: FeatureUUIDEnum;
   };
   fetchProjects: () => any;
+  isLoadingUpdate: boolean;
   project: ProjectType;
   projectPlatformActivated?: boolean;
   rootProject?: ProjectType;
   sparkEnabled: boolean;
+  updateProject: (project: any) => Promise<any>;
 };
 
 type UseProjectProps = {
@@ -82,12 +84,17 @@ function useProject({
   const computeManagementEnabled: boolean =
     featureEnabled(project, FeatureUUIDEnum.COMPUTE_MANAGEMENT);
 
+  const [updateProject, { isLoading: isLoadingUpdate }]: any = useMutation(
+    payload => api.projects.useUpdate(project?.name)({ project: payload }),
+  );
+
   return {
     featureEnabled: (featureUUID: FeatureUUIDEnum): boolean => featureEnabled(project, featureUUID),
     featureUUIDs: FeatureUUIDEnum,
     fetchProjects,
+    isLoadingUpdate,
     project,
-    projectPlatformActivated: project?.name !== rootProject?.name,
+    projectPlatformActivated: project && rootProject && project?.name !== rootProject?.name,
     rootProject,
     sparkEnabled: computeManagementEnabled
       && (project.spark_config || project.emr_config)
@@ -95,6 +102,7 @@ function useProject({
         Object.keys(project.spark_config || {})?.length >= 1
           || Object.keys(project.emr_config || {})?.length >= 1
       ),
+    updateProject,
   };
 }
 

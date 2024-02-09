@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo } from 'react';
+import { useContext, useMemo } from 'react';
 import { ThemeContext } from 'styled-components';
 
 import FileTab, { FileTabProps } from './Tab';
@@ -6,7 +6,6 @@ import FlexContainer from '@oracle/components/FlexContainer';
 import { ThemeType } from '@oracle/styles/themes/constants';
 import { goToWithQuery } from '@utils/routing';
 import { remove } from '@utils/array';
-import { useKeyboardContext } from '@context/Keyboard';
 
 export type TabType = {
   label?: () => string;
@@ -20,24 +19,27 @@ type FileTabsProps = {
   filePaths: string[];
   isSelectedFilePath?: (filePath: string, selectedFilePath: string) => boolean;
   selectedFilePath: string;
+  shouldDisableClose?: (uuid: string) => boolean;
   tabsBefore?: TabType[];
 } & FileTabProps;
 
 export function useFileTabs({
   filePaths,
+  filesTouched,
   isSelectedFilePath,
   onClickTab,
   onClickTabClose,
   onContextMenu,
-  selectedFilePath,
-  tabsBefore,
-  filesTouched,
+  renderTabIcon,
   renderTabTitle,
   savePipelineContent,
+  selectedFilePath,
+  shouldDisableClose,
+  tabsBefore,
 }: FileTabsProps) {
   const themeContext: ThemeType = useContext(ThemeContext);
   const filePathsMemo =
-    useMemo(() => filePaths.map(path => decodeURIComponent(path)), [filePaths]);
+    useMemo(() => filePaths?.map(path => decodeURIComponent(path)), [filePaths]);
   const numberOfFilePaths = useMemo(() => filePathsMemo?.length || 0, [
     filePathsMemo,
   ]);
@@ -53,6 +55,7 @@ export function useFileTabs({
 
     return (
       <FileTab
+        key={uuidFileTab}
         onClickTab={() => onClick?.({
           onClickTab,
         })}
@@ -63,7 +66,7 @@ export function useFileTabs({
     );
   }) : [], [
       isSelectedFilePath,
-      selectedFilePath,
+      onClickTab,
       selectedFilePath,
       tabsBefore,
       themeContext,
@@ -76,13 +79,13 @@ export function useFileTabs({
 
     return (
       <FileTab
+        disableClose={shouldDisableClose && shouldDisableClose?.(filePath)}
         savePipelineContent={savePipelineContent}
         filesTouched={filesTouched}
         filePath={filePath}
         isLast={idx === numberOfFilePaths - 1}
         key={filePath}
         onClickTab={onClickTab}
-        renderTabTitle={renderTabTitle}
         onClickTabClose={(fp: string) => {
           if (onClickTabClose) {
             onClickTabClose(fp);
@@ -99,6 +102,8 @@ export function useFileTabs({
           }
         }}
         onContextMenu={onContextMenu}
+        renderTabIcon={renderTabIcon}
+        renderTabTitle={renderTabTitle}
         selected={selected}
         themeContext={themeContext}
       />
@@ -110,9 +115,13 @@ export function useFileTabs({
     numberOfFilePaths,
     onClickTab,
     onClickTabClose,
+    onContextMenu,
+    renderTabIcon,
     renderTabTitle,
     savePipelineContent,
     selectedFilePath,
+    shouldDisableClose,
+    themeContext,
   ]);
 
   return {
@@ -133,7 +142,7 @@ export function FileTabs({
       fullHeight
       justifyContent="flex-start"
     >
-      {useFileTabs(props)}
+      {useFileTabs(props)?.tabs}
 
       {children}
     </FlexContainer>

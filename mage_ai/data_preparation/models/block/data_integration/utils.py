@@ -330,6 +330,9 @@ def get_state_data(
     if output_file_paths:
         output_file_path = output_file_paths[-1]
 
+        if not os.path.exists(output_file_path):
+            return None
+
         for line in reverse_readline(output_file_path):
             if line:
                 try:
@@ -404,6 +407,7 @@ def execute_data_integration(
         default=encode_complex,
         ignore_nan=True,
     )
+    query = data_integration_settings.get('query')
 
     data_integration_uuid = data_integration_settings.get('data_integration_uuid')
 
@@ -442,7 +446,7 @@ def execute_data_integration(
 
         stream = selected_streams[0] if len(selected_streams) >= 1 else None
         # destination_table = self.template_runtime_configuration.get('destination_table', stream)
-        query_data = (runtime_arguments or {}).copy()
+        query_data = merge_dict(runtime_arguments, query) or {}
 
         if not stream:
             return []

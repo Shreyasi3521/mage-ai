@@ -1,4 +1,5 @@
 import re
+from typing import List
 
 import inflection
 
@@ -56,3 +57,14 @@ def singularize(word: str) -> str:
 
 def capitalize_remove_underscore_lower(word: str) -> str:
     return word.replace('_', ' ').lower().capitalize()
+
+
+def to_ordinal_integers(word: str) -> List[int]:
+    if not word:
+        return []
+
+    return [ord(char) - 96 for char in word]
+
+
+def size_of_string(string: str) -> float:
+    return len(str(string).encode('utf-8'))

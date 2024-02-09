@@ -14,7 +14,6 @@ export enum FeatureUUIDEnum {
   NOTEBOOK_BLOCK_OUTPUT_SPLIT_VIEW = 'notebook_block_output_split_view',
   LOCAL_TIMEZONE = 'display_local_timezone',
   OPERATION_HISTORY = 'operation_history',
-  PROJECT_PLATFORM = 'project_platform',
 }
 
 export enum ProjectTypeEnum {
@@ -39,6 +38,7 @@ export interface EMRConfigType {
   slave_spark_properties?: {
     [key: string]: boolean | number | string;
   };
+  spark_jars?: string[];
 }
 
 export interface SparkConfigType {
@@ -110,6 +110,11 @@ export default interface ProjectType {
   remote_variables_dir?: string;
   repo_path: string;
   root_project?: boolean;
+  settings?: {
+    active: boolean;
+    path: string;
+    uuid: string;
+  }
   spark_config?: SparkConfigType;
   version?: string;
   workspace_config_defaults?: WorkspaceConfigType;

@@ -4,6 +4,10 @@ from time import sleep
 from typing import Any, Dict, List
 
 from mage_ai.data_preparation.models.block import Block
+from mage_ai.data_preparation.models.block.dynamic.utils import (
+    is_dynamic_block,
+    is_dynamic_block_child,
+)
 from mage_ai.data_preparation.models.block.sql import (
     bigquery,
     clickhouse,
@@ -87,6 +91,8 @@ def execute_sql_code(
         PostgreSQL, Redshift, Snowflake, and Trino, applying relevant configurations and
         returning the query execution results.
     """
+    is_dynamic = is_dynamic_block(block) or is_dynamic_block_child(block)
+
     configuration = configuration if configuration else block.configuration
     use_raw_sql = configuration.get('use_raw_sql')
     disable_query_preprocessing = configuration.get('disable_query_preprocessing', False) or False
@@ -138,13 +144,19 @@ def execute_sql_code(
         verbose=BlockType.DATA_EXPORTER == block.type,
     )
 
+    interpolate_vars_options = dict(
+        block=block,
+        dynamic_block_index=dynamic_block_index,
+        global_vars=global_vars,
+    )
+
     if DataSource.BIGQUERY.value == data_provider:
         from mage_ai.io.bigquery import BigQuery
 
         loader = BigQuery.with_config(config_file_loader)
         database = database or loader.default_database()
 
-        bigquery.create_upstream_block_tables(
+        not is_dynamic and bigquery.create_upstream_block_tables(
             loader,
             block,
             **create_upstream_block_tables_kwargs,
@@ -156,7 +168,7 @@ def execute_sql_code(
             loader,
             **interpolate_input_data_kwargs,
         )
-        query_string = interpolate_vars(query_string, global_vars=global_vars, block=block)
+        query_string = interpolate_vars(query_string, **interpolate_vars_options)
 
         if use_raw_sql:
             return execute_raw_sql(
@@ -202,7 +214,7 @@ def execute_sql_code(
         from mage_ai.io.clickhouse import ClickHouse
 
         loader = ClickHouse.with_config(config_file_loader)
-        clickhouse.create_upstream_block_tables(
+        not is_dynamic and clickhouse.create_upstream_block_tables(
             loader,
             block,
             **create_upstream_block_tables_kwargs,
@@ -213,7 +225,7 @@ def execute_sql_code(
             query,
             **interpolate_input_data_kwargs,
         )
-        query_string = interpolate_vars(query_string, global_vars=global_vars, block=block)
+        query_string = interpolate_vars(query_string, **interpolate_vars_options)
 
         database = database or loader.default_database()
 
@@ -246,7 +258,7 @@ def execute_sql_code(
         from mage_ai.io.druid import Druid
 
         with Druid.with_config(config_file_loader) as loader:
-            druid.create_upstream_block_tables(
+            not is_dynamic and druid.create_upstream_block_tables(
                 loader,
                 block,
                 **create_upstream_block_tables_kwargs,
@@ -257,7 +269,7 @@ def execute_sql_code(
                 query,
                 **interpolate_input_data_kwargs,
             )
-            query_string = interpolate_vars(query_string, global_vars=global_vars, block=block)
+            query_string = interpolate_vars(query_string, **interpolate_vars_options)
 
             if use_raw_sql:
                 return execute_raw_sql(
@@ -290,7 +302,7 @@ def execute_sql_code(
 
         loader = DuckDB.with_config(config_file_loader)
         schema = schema or loader.default_schema()
-        duckdb.create_upstream_block_tables(
+        not is_dynamic and duckdb.create_upstream_block_tables(
             loader,
             block,
             **create_upstream_block_tables_kwargs,
@@ -302,7 +314,7 @@ def execute_sql_code(
             **interpolate_input_data_kwargs,
         )
 
-        query_string = interpolate_vars(query_string, global_vars=global_vars, block=block)
+        query_string = interpolate_vars(query_string, **interpolate_vars_options)
 
         if use_raw_sql:
             return execute_raw_sql(
@@ -333,7 +345,7 @@ def execute_sql_code(
         from mage_ai.io.mssql import MSSQL
 
         with MSSQL.with_config(config_file_loader) as loader:
-            mssql.create_upstream_block_tables(
+            not is_dynamic and mssql.create_upstream_block_tables(
                 loader,
                 block,
                 **create_upstream_block_tables_kwargs,
@@ -346,7 +358,7 @@ def execute_sql_code(
             )
 
             schema = schema or loader.default_schema()
-            query_string = interpolate_vars(query_string, global_vars=global_vars, block=block)
+            query_string = interpolate_vars(query_string, **interpolate_vars_options)
 
             if use_raw_sql:
                 return mssql.execute_raw_sql(
@@ -393,7 +405,7 @@ def execute_sql_code(
                 query,
                 **interpolate_input_data_kwargs,
             )
-            query_string = interpolate_vars(query_string, global_vars=global_vars, block=block)
+            query_string = interpolate_vars(query_string, **interpolate_vars_options)
 
             if use_raw_sql:
                 return execute_raw_sql(
@@ -425,7 +437,7 @@ def execute_sql_code(
         from mage_ai.io.postgres import Postgres
 
         with Postgres.with_config(config_file_loader) as loader:
-            postgres.create_upstream_block_tables(
+            not is_dynamic and postgres.create_upstream_block_tables(
                 loader,
                 block,
                 **create_upstream_block_tables_kwargs,
@@ -437,7 +449,7 @@ def execute_sql_code(
                 loader,
                 **interpolate_input_data_kwargs,
             )
-            query_string = interpolate_vars(query_string, global_vars=global_vars, block=block)
+            query_string = interpolate_vars(query_string, **interpolate_vars_options)
 
             schema = schema or loader.default_schema()
 
@@ -471,7 +483,7 @@ def execute_sql_code(
         from mage_ai.io.redshift import Redshift
 
         with Redshift.with_config(config_file_loader) as loader:
-            redshift.create_upstream_block_tables(
+            not is_dynamic and redshift.create_upstream_block_tables(
                 loader,
                 block,
                 **create_upstream_block_tables_kwargs,
@@ -486,7 +498,7 @@ def execute_sql_code(
                 loader,
                 **interpolate_input_data_kwargs,
             )
-            query_string = interpolate_vars(query_string, global_vars=global_vars, block=block)
+            query_string = interpolate_vars(query_string, **interpolate_vars_options)
 
             if use_raw_sql:
                 return execute_raw_sql(
@@ -533,7 +545,7 @@ def execute_sql_code(
             schema = schema or loader.default_schema()
             schema = schema.upper() if schema else schema
 
-            snowflake.create_upstream_block_tables(
+            not is_dynamic and snowflake.create_upstream_block_tables(
                 loader,
                 block,
                 **create_upstream_block_tables_kwargs,
@@ -545,7 +557,7 @@ def execute_sql_code(
                 loader,
                 **interpolate_input_data_kwargs,
             )
-            query_string = interpolate_vars(query_string, global_vars=global_vars, block=block)
+            query_string = interpolate_vars(query_string, **interpolate_vars_options)
 
             if use_raw_sql:
                 return execute_raw_sql(
@@ -589,7 +601,7 @@ def execute_sql_code(
             database = database or loader.default_database()
             schema = schema or loader.default_schema()
 
-            trino.create_upstream_block_tables(
+            not is_dynamic and trino.create_upstream_block_tables(
                 loader,
                 block,
                 unique_table_name_suffix=unique_table_name_suffix,
@@ -603,7 +615,7 @@ def execute_sql_code(
                 unique_table_name_suffix=unique_table_name_suffix,
                 **interpolate_input_data_kwargs,
             )
-            query_string = interpolate_vars(query_string, global_vars=global_vars, block=block)
+            query_string = interpolate_vars(query_string, **interpolate_vars_options)
 
             if use_raw_sql:
                 return execute_raw_sql(

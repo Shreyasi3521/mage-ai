@@ -225,7 +225,7 @@ type CodeBlockProps = {
   disableShortcuts?: boolean;
   executionState: ExecutionStateEnum;
   extraContent?: any;
-  fetchFileTree: () => void;
+  fetchFileTree?: () => void;
   fetchPipeline: () => void;
   globalDataProducts?: GlobalDataProductType[];
   hideExtraCommandButtons?: boolean;
@@ -1209,7 +1209,9 @@ function CodeBlock({
         {
           callback: (resp) => {
             fetchPipeline();
-            fetchFileTree();
+            if (fetchFileTree) {
+              fetchFileTree?.();
+            }
             setContent(content);
             // Select the newly renamed block
             if (resp?.block) {
@@ -1480,7 +1482,7 @@ function CodeBlock({
       const gdp = globalDataProductsByUUID?.[globalDataProduct?.uuid];
 
       return (
-        <CodeHelperStyle>
+        <CodeHelperStyle noMargin>
           <Spacing mb={PADDING_UNITS} mt={1}>
             <Text monospace muted small>
               UUID

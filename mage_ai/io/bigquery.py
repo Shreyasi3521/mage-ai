@@ -1,13 +1,21 @@
 from typing import Dict, List, Mapping, Union
 
-from google.cloud.bigquery import Client, LoadJobConfig, WriteDisposition
+from google.cloud.bigquery import (
+    Client,
+    LoadJobConfig,
+    QueryJob,
+    SchemaField,
+    WriteDisposition,
+)
 from google.oauth2 import service_account
 from pandas import DataFrame
+from sqlglot import exp, parse_one
 
 from mage_ai.io.base import QUERY_ROW_LIMIT, BaseSQLDatabase, ExportWritePolicy
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.export_utils import infer_dtypes
 from mage_ai.shared.custom_logger import DX_PRINTER
+from mage_ai.shared.environments import is_debug
 from mage_ai.shared.utils import (
     convert_pandas_dtype_to_python_type,
     convert_python_type_to_bigquery_type,
@@ -188,6 +196,7 @@ WHERE TABLE_NAME = '{table_name}'
         table_id: str = None,
         database: Union[str, None] = None,
         if_exists: str = 'replace',
+        overwrite_types: Dict = None,
         query_string: Union[str, None] = None,
         verbose: bool = True,
         **configuration_params,
@@ -199,16 +208,17 @@ WHERE TABLE_NAME = '{table_name}'
         Args:
             df (DataFrame): Data frame to export
             table_id (str): ID of the table to export the data frame to. If of the format
-            `"your-project.your_dataset.your_table_name"`. If this table exists,
-            the table schema must match the data frame schema. If this table doesn't exist,
-            the table schema is automatically inferred.
+                `"your-project.your_dataset.your_table_name"`. If this table exists,
+                the table schema must match the data frame schema. If this table doesn't exist,
+                the table schema is automatically inferred.
             if_exists (str): Specifies export policy if table exists. Either
                 - `'fail'`: throw an error.
                 - `'replace'`: drops existing table and creates new table of same name.
                 - `'append'`: appends data frame to existing table. In this case the schema must
                                 match the original table.
-            Defaults to `'replace'`. If `write_disposition` is specified as a keyword argument,
-            this parameter is ignored (as both define the same functionality).
+                Defaults to `'replace'`. If `write_disposition` is specified as a keyword argument,
+                this parameter is ignored (as both define the same functionality).
+            overwrite_types (Dict): The column types to be overwritten by users.
             **configuration_params: Configuration parameters for export job
         """
         if table_id is None:
@@ -258,6 +268,8 @@ WHERE table_id = '{table_name}'
 
             else:
                 config = LoadJobConfig(**configuration_params)
+                if overwrite_types is not None:
+                    config.schema = [SchemaField(k, v) for k, v in overwrite_types.items()]
                 if 'write_disposition' not in configuration_params:
                     if if_exists == 'replace':
                         config.write_disposition = WriteDisposition.WRITE_TRUNCATE
@@ -341,6 +353,10 @@ WHERE table_id = '{table_name}'
                         if query_variables and idx < len(query_variables) \
                         else {}
             query = self._clean_query(query)
+
+            if is_debug():
+                print(f'\nExecuting query:\n\n{query}\n')
+
             result = self.client.query(query, **variables)
 
             if fetch_query_at_indexes and idx < len(fetch_query_at_indexes) and \
@@ -349,7 +365,93 @@ WHERE table_id = '{table_name}'
 
             results.append(result)
 
-        return results
+        serialized = []
+
+        for result in results:
+            try:
+                if isinstance(result, QueryJob):
+                    serialized.append(result.to_dataframe())
+                else:
+                    serialized.append(result)
+            except Exception:
+                pass
+
+        return serialized
+
+    def _clean_query(self, query_string: str) -> str:
+        query_string = super()._clean_query(query_string)
+
+        # This breaks io/bigquery.py:
+        # BadRequest: 400 Syntax error:
+        # Expected keyword ALL or keyword DISTINCT but got keyword SELECT at [3:140]
+        # try:
+        #     query_string_updated = self.__fix_table_names(query_string)
+        #     query_string = query_string_updated
+        # except Exception as err:
+        #     print(f'[ERROR] Attempted to complete table names: {err}, will continue...')
+
+        return query_string
+
+    def __fix_table_names(self, query_string: str) -> str:
+        # Add best guess database and data set names to each table so that it doesn’t return 404.
+        mapping = {}
+
+        for table in parse_one(query_string, read='bigquery').find_all(exp.Table):
+            if table.catalog not in mapping:
+                mapping[table.catalog] = {}
+            if table.db not in mapping[table.catalog]:
+                mapping[table.catalog][table.db] = []
+            mapping[table.catalog][table.db].append(table.name)
+
+        database = sorted(
+            [(len(mapping[db]), db) for db in mapping.keys() if db],
+            reverse=True,
+        )[0][1]
+
+        if not database:
+            raise Exception('At least 1 of the tables must contain: database.dataset.table')
+
+        mapping2 = mapping[database]
+        dataset = sorted(
+            [(len(mapping2[ds]), ds) for ds in mapping2.keys() if ds],
+            reverse=True,
+        )[0][1]
+
+        if not dataset:
+            raise Exception('At least 1 of the tables must contain: database.dataset.table')
+
+        if is_debug():
+            print(f'Database with the most frequency: {database}')
+            print(f'Dataset with the most frequency : {dataset}')
+
+        expression_tree = parse_one(query_string, read='bigquery')
+
+        def transformer(node):
+            if isinstance(node, exp.Table):
+                parts = [
+                    node.catalog if node.catalog else database,
+                    node.db if node.db and node.db != database else dataset,
+                    node.name
+                ]
+
+                full_table_name = '.'.join(parts)
+
+                if is_debug():
+                    if not node.catalog or not node.db or node.db == database:
+                        print(f'Malformed full table name: {node.catalog}.{node.db}.{node.name}')
+                        print(f'Adjusting full table name: {full_table_name}')
+
+                node.set('catalog', parts[0])
+                node.set('db', parts[1])
+                node.set('name', parts[2])
+
+                return node
+
+            return node
+
+        transformed_tree = expression_tree.transform(transformer)
+
+        return transformed_tree.sql()
 
     @classmethod
     def with_config(cls, config: BaseConfigLoader, **kwargs) -> 'BigQuery':

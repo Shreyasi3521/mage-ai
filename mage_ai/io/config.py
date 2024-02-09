@@ -16,6 +16,10 @@ class ConfigKey(str, Enum):
     List of configuration settings for use with data IO clients.
     """
 
+    ALGOLIA_APP_ID = 'ALGOLIA_APP_ID'
+    ALGOLIA_API_KEY = 'ALGOLIA_API_KEY'
+    ALGOLIA_INDEX_NAME = 'ALGOLIA_INDEX_NAME'
+
     AWS_ACCESS_KEY_ID = 'AWS_ACCESS_KEY_ID'
     AWS_ENDPOINT = 'AWS_ENDPOINT'
     AWS_REGION = 'AWS_REGION'
@@ -46,6 +50,7 @@ class ConfigKey(str, Enum):
 
     DUCKDB_DATABASE = 'DUCKDB_DATABASE'
     DUCKDB_SCHEMA = 'DUCKDB_SCHEMA'
+    MOTHERDUCK_TOKEN = 'MOTHERDUCK_TOKEN'
 
     GOOGLE_LOCATION = 'GOOGLE_LOCATION'
     GOOGLE_SERVICE_ACC_KEY = 'GOOGLE_SERVICE_ACC_KEY'
@@ -79,6 +84,7 @@ class ConfigKey(str, Enum):
     ORACLEDB_HOST = 'ORACLEDB_HOST'
     ORACLEDB_PORT = 'ORACLEDB_PORT'
     ORACLEDB_SERVICE = 'ORACLEDB_SERVICE'
+    ORACLEDB_MODE = 'ORACLEDB_MODE'
 
     PINOT_HOST = 'PINOT_HOST'
     PINOT_PASSWORD = 'PINOT_PASSWORD'
@@ -143,6 +149,11 @@ class ConfigKey(str, Enum):
     TRINO_PORT = 'TRINO_PORT'
     TRINO_SCHEMA = 'TRINO_SCHEMA'
     TRINO_USER = 'TRINO_USER'
+
+    WEAVIATE_ENDPOINT = 'WEAVIATE_ENDPOINT'
+    WEAVIATE_INSTANCE_API_KEY = 'WEAVIATE_INSTANCE_API_KEY'
+    WEAVIATE_INFERENCE_API_KEY = 'WEAVIATE_INFERENCE_API_KEY'
+    WEAVIATE_COLLECTION = 'WEAVIATE_COLLECTION'
 
 
 class BaseConfigLoader(ABC):
@@ -327,6 +338,7 @@ class VerboseConfigKey(str, Enum):
     Config key headers for the verbose configuration file format.
     """
 
+    ALGOLIA = 'Algolia'
     AWS = 'AWS'
     BIGQUERY = 'BigQuery'
     CHROMA = 'Chroma'
@@ -339,10 +351,17 @@ class VerboseConfigKey(str, Enum):
     SNOWFLAKE = 'Snowflake'
     SPARK = 'Spark'
     QDRANT = 'Qdrant'
+    WEAVIATE = 'Weaviate'
 
 
 class ConfigFileLoader(BaseConfigLoader):
     KEY_MAP = {
+        ConfigKey.ALGOLIA_APP_ID: (
+            VerboseConfigKey.ALGOLIA, 'app_id'),
+        ConfigKey.ALGOLIA_API_KEY: (
+            VerboseConfigKey.ALGOLIA, 'api_key'),
+        ConfigKey.ALGOLIA_INDEX_NAME: (
+            VerboseConfigKey.ALGOLIA, 'index_name'),
         ConfigKey.AWS_ACCESS_KEY_ID: (VerboseConfigKey.AWS, 'access_key_id'),
         ConfigKey.AWS_REGION: (VerboseConfigKey.AWS, 'region'),
         ConfigKey.AWS_SECRET_ACCESS_KEY: (VerboseConfigKey.AWS, 'secret_access_key'),
@@ -402,6 +421,7 @@ class ConfigFileLoader(BaseConfigLoader):
         ConfigKey.DRUID_USER: (VerboseConfigKey.DRUID, 'user'),
         ConfigKey.DUCKDB_DATABASE: (VerboseConfigKey.DUCKDB, 'database'),
         ConfigKey.DUCKDB_SCHEMA: (VerboseConfigKey.DUCKDB, 'schema'),
+        ConfigKey.MOTHERDUCK_TOKEN: (VerboseConfigKey.DUCKDB, 'motherduck_token'),
         ConfigKey.PINOT_HOST: (VerboseConfigKey.PINOT, 'host'),
         ConfigKey.PINOT_USER: (VerboseConfigKey.PINOT, 'password'),
         ConfigKey.PINOT_PATH: (VerboseConfigKey.PINOT, 'path'),
@@ -439,6 +459,14 @@ class ConfigFileLoader(BaseConfigLoader):
             VerboseConfigKey.SPARK, 'server_side_parameters'),
         ConfigKey.SPARK_TOKEN: (VerboseConfigKey.SPARK, 'token'),
         ConfigKey.SPARK_USER: (VerboseConfigKey.SPARK, 'user'),
+        ConfigKey.WEAVIATE_ENDPOINT: (
+            VerboseConfigKey.WEAVIATE, 'endpoint'),
+        ConfigKey.WEAVIATE_COLLECTION: (
+            VerboseConfigKey.WEAVIATE, 'collection'),
+        ConfigKey.WEAVIATE_INSTANCE_API_KEY: (
+            VerboseConfigKey.WEAVIATE, 'instance_api_key'),
+        ConfigKey.WEAVIATE_INFERENCE_API_KEY: (
+            VerboseConfigKey.WEAVIATE, 'inference_api_key'),
     }
 
     def __init__(

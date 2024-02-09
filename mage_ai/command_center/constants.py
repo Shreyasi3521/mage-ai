@@ -37,6 +37,7 @@ class ObjectType(str, Enum):
     PIPELINE_RUN = 'pipeline_run'
     PROJECT = 'project'
     REMOTE = 'remote'
+    TERMINAL = 'terminal'
     TRIGGER = 'trigger'
     VERSION_CONTROL_FILE = 'version_control_file'
 
@@ -61,6 +62,7 @@ class FileExtension(str, Enum):
 class ButtonActionType(str, Enum):
     ADD_APPLICATION = 'add_application'
     CLOSE_APPLICATION = 'close_application'  # Go back out of the current application.
+    CLOSE_COMMAND_CENTER = 'close_command_center'
     CUSTOM_ACTIONS = 'custom_actions'
     EXECUTE = 'execute'  # Executes the actions associated to the application’s item.
     REPLACE_APPLICATION = 'replace_application'
@@ -71,6 +73,7 @@ class ButtonActionType(str, Enum):
 class InteractionType(str, Enum):
     CLICK = 'click'
     CLOSE_APPLICATION = ButtonActionType.CLOSE_APPLICATION.value
+    CLOSE_COMMAND_CENTER = ButtonActionType.CLOSE_COMMAND_CENTER.value
     FETCH_ITEMS = 'fetch_items'
     OPEN_FILE = 'open_file'
     RESET_FORM = ButtonActionType.RESET_FORM.value
@@ -97,6 +100,7 @@ class RenderLocationType(str, Enum):
 
 class ApplicationExpansionUUID(str, Enum):
     ArcaneLibrary = 'ArcaneLibrary'
+    PortalTerminal = 'PortalTerminal'
     VersionControlFileDiffs = 'VersionControlFileDiffs'
 
 

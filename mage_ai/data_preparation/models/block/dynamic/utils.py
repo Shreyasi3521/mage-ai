@@ -1,8 +1,16 @@
+import json
 import os
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
+import pandas as pd
+
+from mage_ai.data_preparation.models.block.dynamic.variables import (
+    get_outputs_for_dynamic_block,
+)
+from mage_ai.data_preparation.models.constants import DATAFRAME_ANALYSIS_MAX_COLUMNS
+from mage_ai.server.kernel_output_parser import DataType
 from mage_ai.shared.array import find
 from mage_ai.shared.custom_logger import DX_PRINTER
 from mage_ai.shared.hash import ignore_keys_with_blank_values
@@ -74,7 +82,7 @@ def is_dynamic_block(block) -> bool:
     Returns:
         bool: True if the block is a dynamic block, False otherwise.
     """
-    return block.configuration and block.configuration.get('dynamic', False)
+    return block and block.configuration and block.configuration.get('dynamic', False)
 
 
 def should_reduce_output(block) -> bool:
@@ -92,6 +100,10 @@ def should_reduce_output(block) -> bool:
     return True
 
 
+def has_reduce_output_from_upstreams(block) -> bool:
+    return any([should_reduce_output(upstream_block) for upstream_block in block.upstream_blocks])
+
+
 def has_dynamic_block_upstream_parent(block) -> bool:
     return block.upstream_blocks and any([is_dynamic_block(b) for b in block.upstream_blocks])
 
@@ -106,6 +118,9 @@ def is_dynamic_block_child(block) -> bool:
     Returns:
         bool: True if the block is a dynamic block child, False otherwise.
     """
+    if not block:
+        return False
+
     dynamic_or_child = []
 
     for upstream_block in block.upstream_blocks:
@@ -175,11 +190,15 @@ def uuid_for_output_variables(
     if block_uuid is None:
         block_uuid = block.uuid
 
-    if dynamic_block_uuid:
-        block_uuid = dynamic_block_uuid
-        dynamic_block_index = None
+    is_dynamic_child = is_dynamic_block_child(block)
 
-    if dynamic_block_index is not None or is_dynamic_block_child(block):
+    if is_dynamic_child and dynamic_block_index is not None:
+        return os.path.join(block.uuid, str(dynamic_block_index)), True
+
+    is_dynamic = is_dynamic_block(block)
+    if (not is_dynamic and (dynamic_block_index is None or is_dynamic_child)) or \
+            (is_dynamic and is_dynamic_child):
+
         parts = block_uuid.split(':')
 
         if len(parts) >= 2:
@@ -217,24 +236,313 @@ def uuid_for_output_variables(
     return (block_uuid, changed)
 
 
-def mock_dynamic_in_real_scenario(block, **kwargs) -> Dict:
-    options = kwargs.copy()
+def transform_dataframe_for_display(dataframe: pd.DataFrame) -> Dict:
+    data = None
+    if isinstance(dataframe, pd.DataFrame):
+        columns_to_display = dataframe.columns.tolist()[:DATAFRAME_ANALYSIS_MAX_COLUMNS]
+        row_count, column_count = dataframe.shape
+
+        data = dict(
+            columns=columns_to_display,
+            rows=json.loads(
+                dataframe[columns_to_display].to_json(orient='split')
+            )['data'],
+            index=list(dataframe.index),
+            shape=[row_count, column_count],
+        )
+    else:
+        data = dict(
+            columns=['col0'],
+            rows=[[dataframe]],
+            index=[0],
+            shape=[1, 1],
+        )
+
+    return dict(
+        data=data,
+        type=DataType.TABLE,
+    )
+
+
+def coerce_into_dataframe(child_data: Union[
+    List[Union[Dict, int, str, pd.DataFrame]],
+    pd.DataFrame
+]) -> Dict:
+    if isinstance(child_data, list) and len(child_data) >= 1:
+        item = child_data[0]
+        if isinstance(item, pd.DataFrame):
+            child_data = child_data
+        elif isinstance(item, dict):
+            child_data = pd.DataFrame(child_data)
+        else:
+            child_data = pd.DataFrame(
+                [dict(col=value) for value in child_data],
+            )
+    elif isinstance(child_data, pd.DataFrame):
+        return child_data
+    else:
+        child_data = pd.DataFrame([dict(col=child_data)])
+
+    return child_data
+
+
+def limit_output(output: Union[List, pd.DataFrame], sample_count: int) -> Union[List, pd.DataFrame]:
+    if sample_count is not None:
+        if output is not None:
+            if isinstance(output, list):
+                output = output[:sample_count]
+            elif isinstance(output, pd.DataFrame):
+                output = output.iloc[:sample_count]
+    return output
+
+
+def transform_output(
+    output: Tuple[
+        Union[
+            List[Union[Dict, int, str, pd.DataFrame]],
+            pd.DataFrame
+        ],
+        List[Dict]
+    ],
+):
+    child_data = None
+    metadata = None
+    if len(output) >= 1:
+        child_data = output[0]
+
+        if len(output) >= 2:
+            metadata = output[1]
+
+    if child_data is None:
+        return []
+
+    child_data = coerce_into_dataframe(child_data)
+
+    if isinstance(child_data, tuple):
+        return transform_output(child_data)
+    elif isinstance(child_data, list):
+        child_data = [transform_dataframe_for_display(data) for data in child_data]
+    else:
+        child_data = transform_dataframe_for_display(child_data)
+
+    if metadata is not None:
+        metadata = transform_dataframe_for_display(coerce_into_dataframe(metadata))
+
+    return child_data, metadata
+
+
+def transform_output_for_display(
+    output: Tuple[
+        Union[
+            List[Union[Dict, int, str, pd.DataFrame]],
+            pd.DataFrame
+        ],
+        List[Dict]
+    ],
+    sample_count: int = None,
+) -> List[Dict]:
+    child_data, metadata = transform_output(output)
+    child_data = limit_output(child_data, sample_count)
+    metadata = limit_output(metadata, sample_count)
+
+    return dict(
+        data=dict(
+            columns=['child_data', 'metadata'],
+            index=[0, 1],
+            rows=[child_data, metadata],
+            shape=[2, 2],
+        ),
+        type=DataType.TABLE,
+        multi_output=True,
+    )
+
+
+def transform_output_for_display_reduce_output(
+    output: List[Any],
+    sample_count: int = None,
+) -> List[Dict]:
+    output = limit_output(output, sample_count)
+
+    arr = [dict(
+        text_data=data,
+        type=DataType.TEXT,
+        variable_uuid=f'output_{idx}',
+    ) for idx, data in enumerate(output)]
+
+    return arr
+
+
+def combine_transformed_output_for_multi_output(transform_outputs: List[Dict]):
+    columns = []
+    index = []
+    for i in range(len(transform_outputs)):
+        columns.append(f'child_{i}')
+        index.append(i)
+
+    return dict(
+        data=dict(
+            columns=columns,
+            index=index,
+            rows=transform_outputs,
+            shape=[len(transform_outputs), len(columns)],
+        ),
+        type=DataType.TABLE,
+        multi_output=True,
+    )
+
+
+def transform_output_for_display_dynamic_child(
+    output: List[
+        Union[
+            List[Union[Dict, int, str, pd.DataFrame]],
+            Dict,
+            int,
+            str,
+            pd.DataFrame
+        ]
+    ],
+    is_dynamic: bool = False,
+    sample_count: int = None,
+) -> List[Dict]:
+    df = None
+    for output_from_variable_object in output:
+        df_inner = coerce_into_dataframe(output_from_variable_object)
+        if df is None:
+            df = df_inner
+        else:
+            df = pd.concat([df, df_inner], axis=1)
+
+    df = limit_output(df, sample_count)
+    if 1 == len(set(df.columns)):
+        df.columns = [f'{col}_{idx}' for idx, col in enumerate(df.columns)]
+
+    return transform_dataframe_for_display(df)
+
+
+def create_combinations(combinations: List[Any]) -> List[Any]:
+    def __create_combinations(combinations_inner: List[Any]) -> List[Any]:
+        combos = []
+
+        for idx, arr in enumerate(combinations_inner):
+            for value in arr:
+                combinations_next = combinations_inner[(idx + 1):]
+                if len(combinations_next) >= 1:
+                    for combos_down in __create_combinations(combinations_next):
+                        combos.append([value] + combos_down)
+                else:
+                    combos.append([value])
+
+        return combos
+
+    count = len(combinations)
+    arr = __create_combinations(combinations)
+    return [combo for combo in arr if len(combo) == count]
+
+
+def build_combinations_for_dynamic_child(
+    block,
+    execution_partition: str = None,
+    **kwargs,
+):
+    """
+    kwargs (if from output_display.py)
+        custom_code
+        execution_uuid
+        from_notebook
+        global_vars
+        logger
+        output_messages_to_logs
+        run_settings
+        update_status
+    """
+
+    """
+    A list for each upstream block
+    [
+        [0, 1, 2],
+        [0],
+        [0, 1],
+    ]
+    """
+    dynamic_counts = []
 
     for upstream_block in block.upstream_blocks:
-        if is_dynamic_block(upstream_block) or is_dynamic_block_child(upstream_block):
-            if options.get('dynamic_block_index') is None:
-                options['dynamic_block_index'] = 0
-            if options.get('dynamic_block_uuid') is None:
-                options['dynamic_block_uuid'] = build_dynamic_block_uuid(
-                    block.uuid,
-                    index=0,
-                )
-            if not options.get('dynamic_block_indexes'):
-                options['dynamic_block_indexes'] = {}
-            if upstream_block.uuid not in options['dynamic_block_indexes']:
-                options['dynamic_block_indexes'][upstream_block.uuid] = 0
+        # Dynamic child logic always takes precedence
+        has_reduce_output = should_reduce_output(upstream_block)
+        is_dynamic_child = is_dynamic_block_child(upstream_block)
+        is_dynamic = is_dynamic_block(upstream_block)
 
-    return options
+        if (is_dynamic_child or is_dynamic) and not has_reduce_output:
+            if is_dynamic_child:
+                """
+                Get the number of children that was for this upstream block:
+                by getting all the top level output variables: e.g.
+                    0/
+                        output_0
+                    1/
+                        output_1
+                Top level variables are: 0, 1...N
+                """
+                # e.g. 3 combinations aka children were made for the upstream dynamic child block
+                arr = []
+                children_created = build_combinations_for_dynamic_child(
+                    upstream_block,
+                    execution_partition=execution_partition,
+                )
+                if is_dynamic:
+                    for dynamic_block_index in range(len(children_created)):
+                        values, _metadata = get_outputs_for_dynamic_block(
+                            upstream_block,
+                            execution_partition=execution_partition,
+                            dynamic_block_index=dynamic_block_index
+                        )
+                        if values is not None:
+                            arr.extend([idx for idx in range(len(values))])
+                        else:
+                            arr.append(0)
+                else:
+                    arr.extend([idx for idx in range(len(children_created))])
+            else:
+                arr, _metadata = get_outputs_for_dynamic_block(
+                    upstream_block,
+                    execution_partition=execution_partition,
+                )
+            if arr is not None:
+                dynamic_counts.append([idx for idx in range(len(arr))])
+            else:
+                dynamic_counts.append([0])
+        else:
+            dynamic_counts.append([0])
+
+    # [[0], [1], [2]]
+    combinations = create_combinations(dynamic_counts)
+
+    settings = []
+    for dynamic_block_index, _arr in enumerate(combinations):
+        # dynamic_block_index = 0
+        # arr = [1, 2, 3, 4]
+
+        # dynamic_block_indexes = { 'dynamic_parent': 1 }
+        dynamic_block_indexes = {}
+        for idx, upstream_block in enumerate(block.upstream_blocks):
+            is_dynamic_child = is_dynamic_block_child(upstream_block)
+            is_dynamic = is_dynamic_block(upstream_block)
+
+            # 0 % 3 = 0
+            # 1 % 3 = 1
+            # 2 % 3 = 2
+
+            parent_index = dynamic_block_index % len(dynamic_counts[idx])
+
+            if is_dynamic_child or is_dynamic:
+                dynamic_block_indexes[upstream_block.uuid] = parent_index
+
+        settings.append(dict(
+            dynamic_block_index=dynamic_block_index,
+            dynamic_block_indexes=dynamic_block_indexes,
+        ))
+
+    return settings
 
 
 @dataclass
@@ -573,3 +881,55 @@ def all_upstreams_completed(block, block_runs: List) -> bool:
                 return False
 
     return all(completed_checks)
+
+
+def check_all_dynamic_upstreams_completed(
+    block,
+    block_runs: List,
+    execution_partition: str = None,
+):
+    pipeline = block.pipeline
+
+    def __is_completed(
+        upstream_block,
+        block_runs=block_runs,
+        execution_partition=execution_partition,
+        pipeline=pipeline,
+    ):
+        if not upstream_block.upstream_blocks:
+            return True
+
+        from mage_ai.orchestration.db.models.schedules import BlockRun
+
+        upstreams_done = all([check_all_dynamic_upstreams_completed(
+            b,
+            block_runs=block_runs,
+            execution_partition=execution_partition,
+        ) for b in upstream_block.upstream_blocks])
+
+        if not upstreams_done:
+            return False
+
+        is_dynamic_child = is_dynamic_block_child(upstream_block)
+        if is_dynamic_child:
+            combos = build_combinations_for_dynamic_child(
+                upstream_block,
+                execution_partition=execution_partition,
+            )
+
+            selected = [br for br in block_runs if pipeline.get_block(
+                br.block_uuid,
+            ).uuid == upstream_block.uuid and br.status == BlockRun.BlockRunStatus.COMPLETED]
+
+            if len(list(selected)) < len(combos) + 1:
+                return False
+
+        return all([br.status == BlockRun.BlockRunStatus.COMPLETED for br in filter(
+            lambda br: pipeline.get_block(br.block_uuid).uuid == upstream_block.uuid,
+            block_runs,
+        )])
+
+    # 1. Are all the upstream blocks for my upstream blocks completed?
+    # 2. Then, are my immediate upstream blocks completed?
+    checks = [__is_completed(upstream_block) for upstream_block in block.upstream_blocks]
+    return all(checks)

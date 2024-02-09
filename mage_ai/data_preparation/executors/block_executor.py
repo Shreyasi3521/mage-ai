@@ -1,3 +1,4 @@
+import asyncio
 import json
 import traceback
 from datetime import datetime, timedelta
@@ -20,9 +21,7 @@ from mage_ai.data_preparation.models.block.data_integration.utils import (
     get_streams_from_output_directory,
     source_module_file_path,
 )
-from mage_ai.data_preparation.models.block.dynamic.dynamic_child import (
-    DynamicChildBlockFactory,
-)
+from mage_ai.data_preparation.models.block.dynamic.child import DynamicChildController
 from mage_ai.data_preparation.models.block.dynamic.utils import (
     is_dynamic_block,
     is_dynamic_block_child,
@@ -42,9 +41,10 @@ from mage_ai.data_preparation.models.project.constants import FeatureUUID
 from mage_ai.data_preparation.models.triggers import ScheduleInterval, ScheduleType
 from mage_ai.data_preparation.shared.retry import RetryConfig
 from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun
-from mage_ai.shared.custom_logger import DX_PRINTER
 from mage_ai.shared.hash import merge_dict
 from mage_ai.shared.utils import clean_name
+from mage_ai.usage_statistics.constants import EventNameType, EventObjectType
+from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
 
 class BlockExecutor:
@@ -85,45 +85,18 @@ class BlockExecutor:
 
         self.block = self.pipeline.get_block(self.block_uuid, check_template=True)
 
-        # If this is the original block run for the original dynamic block
-
-        # Check to see if this block is the original dynamic child block or
-        # a clone of the original dynamic child block.
-        factory = DynamicChildBlockFactory(self.block, block_run_id=block_run_id)
-        wrapper = factory.wrapper()
-        if self.block:
-            is_clone_of_original = wrapper.is_clone_of_original()
-            is_dynamic = wrapper.is_dynamic()
-            is_dynamic_child = wrapper.is_dynamic_child()
-            is_original = wrapper.is_original()
-            is_replicated = wrapper.is_replicated()
-
-            DX_PRINTER.info(
+        if self.block and \
+                is_dynamic_block_child(self.block) and \
                 (
-                    f'Checking if block run {block_uuid} is dynamic child and '
-                    'original, clone of original, or replicated'
-                ),
-                block=self.block,
-                is_clone_of_original=is_clone_of_original,
-                is_dynamic=is_dynamic,
-                is_dynamic_child=is_dynamic_child,
-                is_original=is_original,
-                is_replicated=is_replicated,
-                __uuid='BlockExecutor',
+                    self.block.uuid == block_uuid or (
+                        self.block.replicated_block and self.block.uuid_replicated == block_uuid
+                    )
+                ):
+
+            self.block = DynamicChildController(
+                self.block,
+                block_run_id=block_run_id,
             )
-
-            if is_dynamic_child and (is_original or is_clone_of_original):
-                self.block = factory
-
-                DX_PRINTER.info(
-                    'Initializing dynamic child block factory',
-                    block=self.block,
-                    clone_of_original=wrapper.is_clone_of_original(),
-                    is_dynamic=wrapper.is_dynamic(),
-                    is_dynamic_child=wrapper.is_dynamic_child(),
-                    original=wrapper.is_original(),
-                    __uuid='BlockExecutor',
-                )
 
         self.block_run = None
 
@@ -146,6 +119,7 @@ class BlockExecutor:
         update_status: bool = False,
         verify_output: bool = True,
         block_run_dicts: List[str] = None,
+        skip_logging: bool = False,
         **kwargs,
     ) -> Dict:
         """
@@ -175,6 +149,8 @@ class BlockExecutor:
         Returns:
             The result of the block execution.
         """
+        if global_vars is None:
+            global_vars = {}
         block_run = None
 
         if Project.is_feature_enabled_in_root_or_active_project(
@@ -385,13 +361,23 @@ class BlockExecutor:
                 dynamic_upstream_block_uuids = dynamic_upstream_block_uuids_reduce + \
                     dynamic_upstream_block_uuids_no_reduce
 
-            conditional_result = self._execute_conditional(
-                dynamic_block_index=dynamic_block_index,
-                dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
-                global_vars=global_vars,
-                logging_tags=tags,
-                pipeline_run=pipeline_run,
-            )
+            should_run_conditional = True
+
+            if is_dynamic_block_child(self.block):
+                if self.block_run and self.block_run.block_uuid == self.block.uuid:
+                    should_run_conditional = False
+
+            if should_run_conditional:
+                conditional_result = should_run_conditional and self._execute_conditional(
+                    dynamic_block_index=dynamic_block_index,
+                    dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
+                    global_vars=global_vars,
+                    logging_tags=tags,
+                    pipeline_run=pipeline_run,
+                )
+            else:
+                conditional_result = not should_run_conditional
+
             if not conditional_result:
                 self.logger.info(
                     f'Conditional block(s) returned false for {self.block.uuid}. '
@@ -595,15 +581,17 @@ class BlockExecutor:
                         retry_metadata=self.retry_metadata,
                     )
                     def __execute_with_retry():
+                        # Update global_vars dictionary without copying it so that 'context' arg
+                        # can be shared across blocks
+                        global_vars.update(dict(retry=self.retry_metadata))
+
                         return self._execute(
                             analyze_outputs=analyze_outputs,
                             block_run_id=block_run_id,
                             block_run_outputs_cache=block_run_outputs_cache,
                             cache_block_output_in_memory=cache_block_output_in_memory,
                             callback_url=callback_url,
-                            global_vars=merge_dict(global_vars or {}, dict(
-                                retry=self.retry_metadata,
-                            )),
+                            global_vars=global_vars,
                             update_status=update_status,
                             input_from_output=input_from_output,
                             logging_tags=tags,
@@ -631,11 +619,23 @@ class BlockExecutor:
                         )),
                     )
 
+                    errors = traceback.format_stack()
                     error_details = dict(
                         error=error,
-                        errors=traceback.format_stack(),
+                        errors=errors,
                         message=traceback.format_exc(),
                     )
+
+                    if not skip_logging:
+                        asyncio.run(UsageStatisticLogger().error(
+                            event_name=EventNameType.BLOCK_RUN_ERROR,
+                            errors='\n'.join(errors or []),
+                            message=str(error),
+                            resource=EventObjectType.BLOCK_RUN,
+                            resource_id=self.block_uuid,
+                            resource_parent=EventObjectType.PIPELINE if self.pipeline else None,
+                            resource_parent_id=self.pipeline.uuid if self.pipeline else None,
+                        ))
 
                     if on_failure is not None:
                         on_failure(
@@ -683,19 +683,7 @@ class BlockExecutor:
 
                 # This is passed in from the pipeline scheduler
                 if on_complete is not None:
-                    metrics = None
-                    if self.block and is_dynamic_block(self.block):
-                        if result:
-                            if isinstance(result, dict):
-                                output = result.get('output')
-                            else:
-                                output = result
-
-                            if len(output) >= 1:
-                                child_data = output[0]
-                                metrics = dict(children=len(child_data))
-
-                    on_complete(self.block_uuid, metrics=metrics)
+                    on_complete(self.block_uuid)
                 else:
                     # If this block run is the data integration controller,
                     # don’t update the block run status here.
@@ -726,6 +714,11 @@ class BlockExecutor:
 
             return result
         finally:
+            # The code below causes error when running blocks in pipeline_executor
+            # if not self.block_run and block_run_id:
+            #     self.block_run = BlockRun.query.get(block_run_id)
+            # if self.block_run:
+            #     asyncio.run(UsageStatisticLogger().block_run_ended(self.block_run))
             self.logger_manager.output_logs_to_destination()
 
     def _execute(
@@ -1080,9 +1073,6 @@ class BlockExecutor:
                             arr.append(br)
 
                     return arr
-
-        if self.block and isinstance(self.block, DynamicChildBlockFactory):
-            self.block.set_pipeline_run(pipeline_run)
 
         result = self.block.execute_sync(
             analyze_outputs=analyze_outputs,

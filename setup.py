@@ -18,7 +18,7 @@ setuptools.setup(
     name='mage-ai',
     # NOTE: when you change this, change the value of VERSION in the following file:
     # mage_ai/server/constants.py
-    version='0.9.59',
+    version='0.9.63',
     author='Mage',
     author_email='eng@mage.ai',
     description='Mage is a tool for building and deploying data pipelines.',
@@ -106,7 +106,7 @@ setuptools.setup(
             'botocore==1.29.60',
         ],
         'snowflake': [
-            'snowflake-connector-python==3.2.1',
+            'snowflake-connector-python==3.4.0',
         ],
         'spark': [
             'boto3==1.26.60',
@@ -151,7 +151,7 @@ setuptools.setup(
             'dbt-spark==1.7.1',
             'dbt-sqlserver==1.3.1',
             'dbt-trino==1.7.1',
-            'duckdb==0.9.1',
+            'duckdb==0.9.2',
             'elasticsearch==8.9.0',
             'google-api-core~=2.15.0',
             'google-api-python-client~=2.70.0',
@@ -171,8 +171,10 @@ setuptools.setup(
             'nkeys~=0.1.0',
             'openai>=0.27.8, <1.0.0',
             'opensearch-py==2.0.0',
-            'opentelemetry-exporter-prometheus==0.41b0',
-            'opentelemetry-instrumentation-tornado==0.41b0',
+            'opentelemetry-exporter-prometheus==0.43b0',
+            'opentelemetry-instrumentation-tornado~=0.43b0',
+            'opentelemetry-exporter-otlp~=1.22.0',
+            'opentelemetry-instrumentation-sqlalchemy~=0.42b0',
             'oracledb==1.3.1',
             'pika==1.3.1',
             'pinotdb==5.1.0',
@@ -186,7 +188,7 @@ setuptools.setup(
             'redshift-connector==2.0.915',
             'lxml==4.9.4',
             'requests_aws4auth==1.1.2',
-            'snowflake-connector-python==3.2.1',
+            'snowflake-connector-python==3.4.0',
             'sshtunnel==0.4.0',
             'stomp.py==8.1.0',
             'thefuzz[speedup]==0.19.0',

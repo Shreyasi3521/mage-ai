@@ -24,6 +24,7 @@ function ArcaneLibrary({
   const {
     containerRef,
     headerOffset: headerOffsetProp,
+    startUpOptions,
   } = props;
 
   const refHeader = useRef(null);
@@ -48,6 +49,10 @@ function ArcaneLibrary({
     hiddenAfter: true,
   });
 
+  function onFileVersionClick(value: boolean) {
+    setHiddenAfter(!value);
+  }
+
   const {
     browser,
     browserFlatten,
@@ -55,14 +60,14 @@ function ArcaneLibrary({
     filePaths,
     footer,
     menu,
-    selectedFilePath,
     tabs,
     versions,
-    versionsVisible,
   } = useFileComponents({
     contained: true,
     containerRef: mainContainerRef,
-    selectedFilePath: query?.file_path,
+    onFileVersionClick,
+    selectedFilePath: query?.file_path
+      || startUpOptions?.selectedFilePath ? String(startUpOptions?.selectedFilePath) : undefined,
     showHiddenFilesSetting: true,
     uuid: ApplicationExpansionUUIDEnum.ArcaneLibrary,
   });

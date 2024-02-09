@@ -14,6 +14,7 @@ QUERY_ROW_LIMIT = 10_000_000
 
 
 class DataSource(str, Enum):
+    ALGOLIA = 'algolia'
     API = 'api'
     BIGQUERY = 'bigquery'
     CHROMA = 'chroma'
@@ -35,6 +36,7 @@ class DataSource(str, Enum):
     SNOWFLAKE = 'snowflake'
     SPARK = 'spark'
     TRINO = 'trino'
+    WEAVIATE = 'weaviate'
 
 
 class FileFormat(str, Enum):

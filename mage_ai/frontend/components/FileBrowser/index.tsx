@@ -13,7 +13,11 @@ import { ThemeContext } from 'styled-components';
 import { useMutation } from 'react-query';
 import { createPortal } from 'react-dom';
 
-import BlockType, { BlockRequestPayloadType, BlockTypeEnum } from '@interfaces/BlockType';
+import BlockType, {
+  ADD_ON_BLOCK_TYPES,
+  BlockRequestPayloadType,
+  BlockTypeEnum,
+} from '@interfaces/BlockType';
 import FileHeaderMenu from './FileHeaderMenu';
 import FileType from '@interfaces/FileType';
 import FlyoutMenu from '@oracle/components/FlyoutMenu';
@@ -313,7 +317,7 @@ function FileBrowser({
               ...draggingFile,
               path: getFullPath(draggingFile),
             },
-            status.repo_path,
+            status?.repo_path,
             pipeline,
           );
 
@@ -323,7 +327,10 @@ function FileBrowser({
               require_unique_name: false,
             },
             block => {
-              if (isIntegrationPipeline && dataExporterBlock) {
+              if (isIntegrationPipeline
+                && dataExporterBlock
+                && !ADD_ON_BLOCK_TYPES.includes(block.type)
+              ) {
                 // @ts-ignore
                 updateDestinationBlock({
                   block: {
@@ -411,7 +418,7 @@ function FileBrowser({
   const selectedBlock = useMemo(() => selectedFile && getBlockFromFile(selectedFile), [
     selectedFile,
   ]);
-  const draggingBlock  = useMemo(() => draggingFile && getBlockFromFile(draggingFile), [
+  const draggingBlock  = useMemo(() => draggingFile && getBlockFromFile(draggingFile, null, true), [
     draggingFile,
   ]);
 
@@ -511,7 +518,7 @@ function FileBrowser({
             selectedFolder?.children?.forEach((file: FileType) => {
               if (!('children' in file)) {
                 const fp = getFullPath(selectedFolder)
-                onClickFile([fp, file?.name]?.join(osPath.sep));
+                onClickFile([fp, file?.name]?.join(osPath.sep), file);
               }
             });
           },
@@ -602,15 +609,13 @@ function FileBrowser({
         },
       ]);
 
-      if (featureEnabled?.(featureUUIDs?.PROJECT_PLATFORM)) {
-        items.push({
-          beforeIcon: <GradientLogoIcon width={UNIT * 1.5} />,
-          onClick: () => {
-            showModalNewFolder({ projectType: ProjectTypeEnum.STANDALONE });
-          },
-          uuid: 'New Mage project',
-        });
-      }
+      items.push({
+        beforeIcon: <GradientLogoIcon width={UNIT * 1.5} />,
+        onClick: () => {
+          showModalNewFolder({ projectType: ProjectTypeEnum.STANDALONE });
+        },
+        uuid: 'New Mage project',
+      });
 
       if (featureEnabled?.(featureUUIDs?.DBT_V2)) {
         items.push({
@@ -631,7 +636,7 @@ function FileBrowser({
             return (
               <Text muted monospace noWrapping xsmall>
                 {parts?.map((part, idx) => (
-                  <span>
+                  <span key={`${part}_${idx}`}>
                     {idx >= 1 && <br />}
                     {idx >= 1 && '|'}{range(idx).map(() => '--').join('')}<Text
                       inline
@@ -648,9 +653,9 @@ function FileBrowser({
             );
           },
           onClick: () => onClickFile
-            ? onClickFile?.(selectedFile?.path) :
+            ? onClickFile?.(selectedFile?.path, selectedFile) :
             openFile
-              ? openFile?.(selectedFile?.path)
+              ? openFile?.(selectedFile?.path, selectedFile)
               : null,
           uuid: 'file_path',
         });

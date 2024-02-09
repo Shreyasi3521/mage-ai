@@ -93,12 +93,13 @@ ACTIVE_DIRECTORY_DIRECTORY_ID = os.getenv('ACTIVE_DIRECTORY_DIRECTORY_ID', None)
 HOSTNAME = os.getenv('HOSTNAME')
 REDIS_URL = os.getenv('REDIS_URL')
 SERVER_VERBOSITY = os.getenv('SERVER_VERBOSITY', 'info') or 'info'
+SERVER_LOGGING_FORMAT = os.getenv('SERVER_LOGGING_FORMAT')
 
 SHELL_COMMAND = os.getenv('SHELL_COMMAND', None)
 USE_UNIQUE_TERMINAL = os.getenv('USE_UNIQUE_TERMINAL', None)
 
 # sentry environment variables
-SENTRY_DSN = os.getenv('SENTRY_DSN', None)
+SENTRY_DSN = os.getenv('SENTRY_DSN')
 SENTRY_TRACES_SAMPLE_RATE = os.getenv('SENTRY_TRACES_SAMPLE_RATE', 1.0)
 
 # New relic enable environment variable
@@ -107,10 +108,18 @@ NEW_RELIC_CONFIG_PATH = os.getenv('NEW_RELIC_CONFIG_PATH', '')
 
 # If enabled, the /metrics route will expose Tornado server metrics
 ENABLE_PROMETHEUS = get_bool_value(os.getenv('ENABLE_PROMETHEUS', 'False'))
-ENABLE_PROJECT_PLATFORM = os.getenv('ENABLE_PROJECT_PLATFORM', '0').lower() in ('true', '1', 't')
+
+# OpenTelemetry configuration
+OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT', None)
+OTEL_EXPORTER_OTLP_HTTP_ENDPOINT = os.getenv('OTEL_EXPORTER_HTTP_OTLP_ENDPOINT', None)
+OTEL_PYTHON_TORNADO_EXCLUDED_URLS = (
+    os.getenv('OTEL_PYTHON_TORNADO_EXCLUDED_URLS') or '/api/statuses'
+)
 
 DEFAULT_LOCALHOST_URL = 'http://localhost:6789'
 MAGE_PUBLIC_HOST = os.getenv('MAGE_PUBLIC_HOST') or DEFAULT_LOCALHOST_URL
+
+MAX_FILE_CACHE_SIZE = os.getenv('MAX_FILE_CACHE_SIZE') or (1024 * 1024)  # 1 MB
 
 # All base path variables should not include a leading forward slash
 # e.g. MAGE_BASE_PATH = 'test_prefix' -> localhost:6789/test_prefix/pipelines
@@ -150,6 +159,7 @@ MAGE_SETTINGS_ENVIRONMENT_VARIABLES = [
     'LDAP_GROUP_FIELD',
     'LDAP_ROLES_MAPPING',
     'SERVER_VERBOSITY',
+    'SERVER_LOGGING_FORMAT',
     'SHELL_COMMAND',
     'USE_UNIQUE_TERMINAL',
     'SENTRY_DSN',
@@ -161,6 +171,8 @@ MAGE_SETTINGS_ENVIRONMENT_VARIABLES = [
     'SCHEDULER_TRIGGER_INTERVAL',
     'REQUIRE_USER_PERMISSIONS',
     'ENABLE_PROMETHEUS',
+    'OTEL_EXPORTER_OTLP_ENDPOINT',
+    'OTEL_EXPORTER_OTLP_HTTP_ENDPOINT',
     'OKTA_DOMAIN_URL',
     'OKTA_CLIENT_ID',
     'OKTA_CLIENT_SECRET',
@@ -169,5 +181,5 @@ MAGE_SETTINGS_ENVIRONMENT_VARIABLES = [
     'GHE_CLIENT_ID',
     'GHE_CLIENT_SECRET',
     'GHE_HOSTNAME',
-    'ENABLE_PROJECT_PLATFORM',
+    'MAX_FILE_CACHE_SIZE',
 ]

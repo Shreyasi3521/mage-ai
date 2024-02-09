@@ -43,9 +43,6 @@ import {
   getBlockType,
 } from './utils';
 import { find } from '@utils/array';
-import { getBlockFromFile } from '../FileBrowser/utils';
-import { getFullPath } from '@utils/files';
-import { getNonPythonBlockFromFile } from '@components/FileBrowser/utils';
 import { isJsonString } from '@utils/string';
 import { errorOrSuccess, onSuccess } from '@api/utils/response';
 import { onlyKeysPresent } from '@utils/hooks/keyboardShortcuts/utils';
@@ -109,11 +106,11 @@ function FileEditor({
   setSelectedBlock,
   updateFile: updateFileProp,
 }: FileEditorProps) {
-  // const renderRef = useRef(0);
-  // DEBUG(() => {
-  //   renderRef.current += 1;
-  //   console.log(`[FileEditor][${filePath}]: ${renderRef.current} renders`);
-  // });
+  const renderRef = useRef(0);
+  DEBUG(() => {
+    renderRef.current += 1;
+    console.log(`[FileEditor][${filePath}]: ${renderRef.current} renders`);
+  });
 
   const [, setApiReloads] = useGlobalState('apiReloads');
   const [file, setFile] = useState<FileType>(null);

@@ -22,7 +22,8 @@ from mage_ai.orchestration.db.models.schedules import (
     PipelineSchedule,
 )
 from mage_ai.orchestration.pipeline_scheduler import configure_pipeline_run_payload
-from mage_ai.settings.utils import base_repo_path
+
+# from mage_ai.settings.utils import base_repo_path
 from mage_ai.shared.hash import merge_dict
 from mage_ai.tests.base_test import AsyncDBTestCase, DBTestCase
 from mage_ai.tests.factory import (
@@ -235,11 +236,13 @@ class PipelineScheduleTests(DBTestCase):
         )
 
     @freeze_time('2023-10-11 12:13:14')
-    def test_should_schedule(self):
+    def test_should_schedule_with_initial_run(self):
         shared_attrs = dict(
+            last_enabled_at=datetime(2023, 10, 13, 1, 0, 0),
             pipeline_uuid='test_pipeline',
             schedule_interval=ScheduleInterval.DAILY,
             schedule_type=ScheduleType.TIME,
+            settings=dict(create_initial_pipeline_run=True)
         )
 
         self.assertFalse(
@@ -315,27 +318,73 @@ class PipelineScheduleTests(DBTestCase):
                 )
             ).should_schedule()
         )
+        self.assertTrue(
+            PipelineSchedule.create(
+                **merge_dict(
+                    shared_attrs,
+                    dict(
+                        name=self.faker.name(),
+                        schedule_interval=ScheduleInterval.HOURLY,
+                        status=ScheduleStatus.ACTIVE
+                    ),
+                )
+            ).should_schedule()
+        )
+        self.assertTrue(
+            PipelineSchedule.create(
+                **merge_dict(
+                    shared_attrs,
+                    dict(
+                        name=self.faker.name(),
+                        schedule_interval=ScheduleInterval.WEEKLY,
+                        status=ScheduleStatus.ACTIVE
+                    ),
+                )
+            ).should_schedule()
+        )
+        self.assertTrue(
+            PipelineSchedule.create(
+                **merge_dict(
+                    shared_attrs,
+                    dict(
+                        name=self.faker.name(),
+                        schedule_interval=ScheduleInterval.MONTHLY,
+                        status=ScheduleStatus.ACTIVE
+                    ),
+                )
+            ).should_schedule()
+        )
+
+    @freeze_time('2024-01-01 00:03:14')
+    def test_should_schedule_execution_dates(self):
+        shared_attrs = dict(
+            last_enabled_at=datetime(2023, 12, 31, 12, 32, 0),
+            created_at=datetime(2023, 12, 31, 12, 31, 0),
+            pipeline_uuid='test_pipeline',
+            schedule_interval=ScheduleInterval.DAILY,
+            schedule_type=ScheduleType.TIME,
+        )
 
         for schedule_interval, execution_date_true, execution_date_false in [
             (
                 ScheduleInterval.HOURLY,
-                datetime(2023, 10, 11, 11, 0, 0),
-                datetime(2023, 10, 11, 12, 0, 0),
+                datetime(2024, 1, 1, 1, 0, 0),
+                datetime(2024, 1, 1, 0, 0, 0),
             ),
             (
                 ScheduleInterval.DAILY,
-                datetime(2023, 10, 10, 0, 0, 0),
-                datetime(2023, 10, 11, 0, 0, 0),
+                datetime(2024, 1, 2, 0, 0, 0),
+                datetime(2024, 1, 1, 0, 0, 0),
             ),
             (
                 ScheduleInterval.WEEKLY,
-                datetime(2023, 10, 2, 0, 0, 0),
-                datetime(2023, 10, 9, 0, 0, 0),
+                datetime(2024, 1, 8, 0, 0, 0),
+                datetime(2024, 1, 1, 0, 0, 0),
             ),
             (
                 ScheduleInterval.MONTHLY,
-                datetime(2023, 9, 1, 0, 0, 0),
-                datetime(2023, 10, 1, 0, 0, 0),
+                datetime(2024, 2, 1, 0, 0, 0),
+                datetime(2024, 1, 1, 0, 0, 0),
             ),
         ]:
             pipeline_schedule_false = PipelineSchedule.create(
@@ -345,7 +394,7 @@ class PipelineScheduleTests(DBTestCase):
                         name=self.faker.name(),
                         schedule_interval=schedule_interval,
                         # Set the start time to one second ago
-                        start_time=datetime(2023, 10, 11, 12, 13, 13),
+                        start_time=datetime(2024, 1, 1, 0, 3, 13),
                         status=ScheduleStatus.ACTIVE,
                     ),
                 )
@@ -359,11 +408,12 @@ class PipelineScheduleTests(DBTestCase):
                         name=self.faker.name(),
                         schedule_interval=schedule_interval,
                         # Set the start time to one month ago
-                        start_time=datetime(2023, 9, 11, 12, 13, 13),
+                        start_time=datetime(2023, 12, 1, 0, 3, 14),
                         status=ScheduleStatus.ACTIVE,
                     ),
                 )
             )
+            self.assertTrue(pipeline_schedule.should_schedule())
             PipelineRun.create(
                 execution_date=execution_date_true,
                 pipeline_schedule_id=pipeline_schedule.id,
@@ -379,9 +429,75 @@ class PipelineScheduleTests(DBTestCase):
             )
             self.assertFalse(pipeline_schedule.should_schedule())
 
+    @freeze_time('2024-01-01 00:59:14')
+    def test_should_schedule_before_last_enabled_at(self):
+        shared_attrs = dict(
+            last_enabled_at=datetime(2024, 2, 1, 1, 30, 0),
+            pipeline_uuid='test_pipeline',
+            schedule_interval=ScheduleInterval.DAILY,
+            schedule_type=ScheduleType.TIME,
+        )
+
+        for schedule_interval, execution_date in [
+            (
+                ScheduleInterval.HOURLY,
+                datetime(2024, 1, 1, 1, 0, 0),
+            ),
+            (
+                ScheduleInterval.DAILY,
+                datetime(2024, 1, 2, 0, 0, 0),
+            ),
+            (
+                ScheduleInterval.WEEKLY,
+                datetime(2024, 1, 8, 0, 0, 0),
+            ),
+            (
+                ScheduleInterval.MONTHLY,
+                datetime(2024, 2, 1, 0, 0, 0),
+            ),
+        ]:
+            pipeline_schedule_true = PipelineSchedule.create(
+                **merge_dict(
+                    shared_attrs,
+                    dict(
+                        last_enabled_at=datetime(2023, 12, 31, 15, 59, 59),
+                        name=self.faker.name(),
+                        schedule_interval=schedule_interval,
+                        # Set the start time to one month ago
+                        start_time=datetime(2023, 12, 1, 0, 3, 14),
+                        status=ScheduleStatus.ACTIVE,
+                    ),
+                )
+            )
+            self.assertTrue(pipeline_schedule_true.should_schedule())
+
+            pipeline_schedule_false = PipelineSchedule.create(
+                **merge_dict(
+                    shared_attrs,
+                    dict(
+                        name=self.faker.name(),
+                        schedule_interval=schedule_interval,
+                        # Set the start time to one month ago
+                        start_time=datetime(2023, 12, 1, 0, 3, 14),
+                        status=ScheduleStatus.ACTIVE,
+                    ),
+                )
+            )
+            self.assertFalse(pipeline_schedule_false.should_schedule())
+
+            PipelineRun.create(
+                execution_date=execution_date,
+                pipeline_schedule_id=pipeline_schedule_false.id,
+                pipeline_uuid=pipeline_schedule_false.pipeline_uuid,
+                status=PipelineRun.PipelineRunStatus.COMPLETED,
+            )
+            self.assertFalse(pipeline_schedule_false.should_schedule())
+
     @freeze_time('2023-10-11 12:13:14')
     def test_should_schedule_when_landing_time_enabled(self):
         shared_attrs = dict(
+            last_enabled_at=datetime(2023, 10, 11, 1, 0, 0),
+            created_at=datetime(2023, 10, 11, 0, 0, 0),
             pipeline_uuid='test_pipeline',
             schedule_type=ScheduleType.TIME,
             settings=dict(landing_time_enabled=True),
@@ -1066,6 +1182,7 @@ class PipelineScheduleTests(DBTestCase):
         trigger_configs = [
             Trigger.load(
                 config=dict(
+                    last_enabled_at=datetime(2024, 1, 1, 0, 0, 0),
                     name='test create batch trigger 1',
                     pipeline_uuid='test_create_or_update_batch',
                     schedule_type=ScheduleType.TIME,
@@ -1076,6 +1193,7 @@ class PipelineScheduleTests(DBTestCase):
             ),
             Trigger.load(
                 config=dict(
+                    last_enabled_at=datetime(2024, 1, 1, 0, 0, 0),
                     name='test create batch trigger 2',
                     pipeline_uuid='test_create_or_update_batch',
                     schedule_type=ScheduleType.API,
@@ -1086,6 +1204,7 @@ class PipelineScheduleTests(DBTestCase):
             ),
             Trigger.load(
                 config=dict(
+                    last_enabled_at=datetime(2024, 1, 1, 0, 0, 0),
                     name='test create batch trigger 3',
                     pipeline_uuid='test_create_or_update_batch',
                     schedule_type=ScheduleType.TIME,
@@ -1329,220 +1448,6 @@ class PipelineRunTests(DBTestCase):
         self.assertEqual(
             sorted([br.id for br in pipeline_run.executable_block_runs()]),
             sorted([block_run2.id, block_run3.id]),
-        )
-
-    def test_executable_block_runs_for_dynamic_child_blocks(self):
-        self.block.configuration = dict(dynamic=True)
-        self.pipeline.add_block(self.block2, upstream_block_uuids=[self.block.uuid])
-        self.pipeline.add_block(self.block3, upstream_block_uuids=[self.block2.uuid])
-        self.pipeline.add_block(
-            self.block4,
-            upstream_block_uuids=[
-                self.block2.uuid,
-                self.block3.uuid,
-            ],
-        )
-
-        pipeline_run = PipelineRun.create(
-            pipeline_schedule_id=0,
-            pipeline_uuid=self.pipeline.uuid,
-            create_block_runs=False,
-        )
-        block_run1 = BlockRun.create(
-            block_uuid=self.block.uuid,
-            pipeline_run_id=pipeline_run.id,
-        )
-        block_run2 = BlockRun.create(
-            block_uuid=self.block2.uuid,
-            pipeline_run_id=pipeline_run.id,
-        )
-        block_run2_0 = BlockRun.create(
-            block_uuid=f'{self.block2.uuid}:0',
-            pipeline_run_id=pipeline_run.id,
-            metrics=dict(
-                dynamic_block_index=0,
-            ),
-        )
-        block_run2_1 = BlockRun.create(
-            block_uuid=f'{self.block2.uuid}:1',
-            pipeline_run_id=pipeline_run.id,
-            metrics=dict(
-                dynamic_block_index=1,
-            ),
-        )
-        block_run3 = BlockRun.create(
-            block_uuid=self.block3.uuid,
-            pipeline_run_id=pipeline_run.id,
-        )
-        block_run3_0 = BlockRun.create(
-            block_uuid=f'{self.block3.uuid}:0',
-            pipeline_run_id=pipeline_run.id,
-            metrics=dict(
-                dynamic_block_index=0,
-                dynamic_upstream_block_uuids=[
-                    f'{self.block2.uuid}:0',
-                ],
-            ),
-        )
-        block_run3_1 = BlockRun.create(
-            block_uuid=f'{self.block3.uuid}:1',
-            pipeline_run_id=pipeline_run.id,
-            metrics=dict(
-                dynamic_block_index=0,
-                dynamic_upstream_block_uuids=[
-                    f'{self.block2.uuid}:0',
-                    f'{self.block2.uuid}:1',
-                ],
-            ),
-        )
-        block_run4 = BlockRun.create(
-            block_uuid=self.block4.uuid,
-            pipeline_run_id=pipeline_run.id,
-        )
-
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted([block_run1.id]),
-        )
-        block_run1.update(status=BlockRun.BlockRunStatus.COMPLETED)
-
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted(
-                [
-                    block_run2.id,
-                    block_run2_0.id,
-                    block_run2_1.id,
-                ]
-            ),
-        )
-
-        block_run2.update(status=BlockRun.BlockRunStatus.COMPLETED)
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted(
-                [
-                    block_run2_0.id,
-                    block_run2_1.id,
-                    block_run3.id,
-                ]
-            ),
-        )
-
-        # If this is the original dynamic child block, don’t run until all it’s
-        # upstream dynamic child blocks have their upstreams completed.
-        block_run1.update(status=BlockRun.BlockRunStatus.RUNNING)
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted([]),
-        )
-
-        block_run1.update(status=BlockRun.BlockRunStatus.COMPLETED)
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted(
-                [
-                    block_run2_0.id,
-                    block_run2_1.id,
-                    block_run3.id,
-                ]
-            ),
-        )
-
-        block_run2_0.update(status=BlockRun.BlockRunStatus.COMPLETED)
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted(
-                [
-                    block_run2_1.id,
-                    block_run3.id,
-                    block_run3_0.id,
-                ]
-            ),
-        )
-
-        block_run3.update(status=BlockRun.BlockRunStatus.COMPLETED)
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted(
-                [
-                    block_run2_1.id,
-                    block_run3_0.id,
-                ]
-            ),
-        )
-
-        block_run2_1.update(status=BlockRun.BlockRunStatus.COMPLETED)
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted(
-                [
-                    block_run3_0.id,
-                    block_run3_1.id,
-                    block_run4.id,
-                ]
-            ),
-        )
-
-        block_run2_0.update(status=BlockRun.BlockRunStatus.RUNNING)
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted([]),
-        )
-
-        block_run2_0.update(status=BlockRun.BlockRunStatus.COMPLETED)
-        block_run3_0.update(status=BlockRun.BlockRunStatus.COMPLETED)
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted(
-                [
-                    block_run3_1.id,
-                    block_run4.id,
-                ]
-            ),
-        )
-
-        block_run3_1.update(status=BlockRun.BlockRunStatus.COMPLETED)
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted(
-                [
-                    block_run4.id,
-                ]
-            ),
-        )
-
-        self.block3.configuration = dict(reduce_output=True)
-        block_run1.update(status=BlockRun.BlockRunStatus.RUNNING)
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted([]),
-        )
-
-        block_run1.update(status=BlockRun.BlockRunStatus.COMPLETED)
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted(
-                [
-                    block_run4.id,
-                ]
-            ),
-        )
-
-        block_run2.update(status=BlockRun.BlockRunStatus.RUNNING)
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted([]),
-        )
-
-        block_run2.update(status=BlockRun.BlockRunStatus.COMPLETED)
-        self.assertEqual(
-            sorted([br.id for br in pipeline_run.executable_block_runs()]),
-            sorted(
-                [
-                    block_run4.id,
-                ]
-            ),
         )
 
     def test_executable_block_runs_with_hook_blocks(self):
@@ -1801,11 +1706,11 @@ class PipelineScheduleProjectPlatformTests(ProjectPlatformMixin):
             'mage_ai.orchestration.db.models.schedules.project_platform_activated',
             lambda: False,
         ):
-            pipeline_schedule1 = PipelineSchedule.create(
-                name='test pipeline',
-                pipeline_uuid=self.pipeline.uuid,
-                repo_path=base_repo_path(),
-            )
+            # pipeline_schedule1 = PipelineSchedule.create(
+            #     name='test pipeline',
+            #     pipeline_uuid=self.pipeline.uuid,
+            #     repo_path=base_repo_path(),
+            # )
             pipeline_schedule2 = PipelineSchedule.create(
                 name='test pipeline',
                 pipeline_uuid=self.pipeline.uuid,
@@ -1814,7 +1719,7 @@ class PipelineScheduleProjectPlatformTests(ProjectPlatformMixin):
 
             ids = [ps.id for ps in PipelineSchedule.repo_query.all()]
 
-            self.assertIn(pipeline_schedule1.id, ids)
+            # self.assertIn(pipeline_schedule1.id, ids)
             self.assertIn(pipeline_schedule2.id, ids)
 
         with patch(

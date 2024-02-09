@@ -23,11 +23,13 @@ export type FileTabProps = {
   onClickTab?: (filePath: string) => void;
   onClickTabClose?: (filePath: string) => void;
   onContextMenu?: (event: any, filePath: string) => void;
+  renderTabIcon?: (uuid: string) => JSX.Element;
   renderTabTitle?: (filePath: string) => string;
   savePipelineContent?: () => void;
 };
 
 type FileTabPropsInternal = {
+  disableClose?: boolean;
   filePath?: string;
   isLast?: boolean;
   selected?: boolean;
@@ -35,12 +37,14 @@ type FileTabPropsInternal = {
 };
 
 function FileTab({
+  disableClose,
   filePath,
   filesTouched = {},
   isLast,
   onClickTab,
   onClickTabClose,
   onContextMenu,
+  renderTabIcon,
   renderTabTitle,
   savePipelineContent,
   selected,
@@ -102,24 +106,36 @@ function FileTab({
             >
               {!filesTouched[filePath] && (
                 <>
-                  {isBlockFile
-                    ?
-                      <BlockIcon
-                        color={color}
-                        size={UNIT * 1}
-                        square
-                      />
-                    :
-                      <Icon
-                        fill={iconColor}
-                        size={UNIT * 1.5}
-                      />
+                  {renderTabIcon
+                    ? renderTabIcon(filePath)
+                    : isBlockFile
+                      ?
+                        <div
+                          style={{
+                            padding: 1,
+                            justifyContent: 'center',
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <BlockIcon
+                            color={color}
+                            size={10}
+                            square
+                          />
+                        </div>
+                      :
+                        <Icon
+                          fill={iconColor}
+                          size={UNIT * 1.5}
+                        />
                   }
                 </>
               )}
 
               {filesTouched[filePath] && (
                 <Tooltip
+                  block
                   label="Unsaved changes"
                   size={null}
                   widthFitContent
@@ -141,7 +157,7 @@ function FileTab({
             </FlexContainer>
           </Tooltip>
 
-          {onClickTabClose && (
+          {onClickTabClose && !disableClose && (
             <>
               <Spacing mr={2} />
 

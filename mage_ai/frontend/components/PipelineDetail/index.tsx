@@ -40,7 +40,7 @@ import ProjectType, { FeatureUUIDEnum } from '@interfaces/ProjectType';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
 import api from '@api';
-import useFileComponents from '@components/Files/useFileComponents';
+import useDelayFetch from '@api/utils/useDelayFetch';
 import usePrevious from '@utils/usePrevious';
 import useProject from '@utils/models/project/useProject';
 import useStatus from '@utils/models/status/useStatus';
@@ -437,11 +437,16 @@ function PipelineDetail({
     ],
   );
 
-  const { data: dataBlockTemplates } = api.block_templates.list({
-    show_all: useV2AddNewBlock ? true : false,
-  }, {
-    revalidateOnFocus: false,
-  });
+  const { data: dataBlockTemplates } = useDelayFetch(
+    api.block_templates.list,
+    {
+      show_all: useV2AddNewBlock ? true : false,
+    }, {
+      revalidateOnFocus: false,
+    }, {
+      delay: 3000,
+    },
+  );
   const blockTemplates: BlockTemplateType[] =
     useMemo(() => dataBlockTemplates?.block_templates || [], [
       dataBlockTemplates,
@@ -523,7 +528,25 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
         }
       }
 
-      if (disableShortcuts || disableGlobalKeyboardShortcuts) {
+      if (!textareaFocused && !selectedBlock && !isIntegration && useV2AddNewBlock) {
+        if (onlyKeysPresent([KEY_CODE_META, KEY_CODE_FORWARD_SLASH], keyMapping)
+          || onlyKeysPresent([KEY_CODE_CONTROL, KEY_CODE_FORWARD_SLASH], keyMapping)
+        ) {
+          event.preventDefault();
+          setFocusedAddNewBlockSearch(true);
+          searchTextInputRef?.current?.focus();
+          return;
+        } else if (focusedAddNewBlockSearch
+          && onlyKeysPresent([KEY_CODE_ESCAPE], keyMapping)
+        ) {
+          event.preventDefault();
+          setFocusedAddNewBlockSearch(false);
+          searchTextInputRef?.current?.blur();
+          return;
+        }
+      }
+
+      if (!textareaFocused && !selectedBlock && (disableShortcuts || disableGlobalKeyboardShortcuts)) {
         return;
       }
 
@@ -553,21 +576,7 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
           setPipelineContentTouched(true);
         }
       } else if (!isIntegration) {
-        if (useV2AddNewBlock && (
-          onlyKeysPresent([KEY_CODE_META, KEY_CODE_FORWARD_SLASH], keyMapping)
-            || onlyKeysPresent([KEY_CODE_CONTROL, KEY_CODE_FORWARD_SLASH], keyMapping)
-        )) {
-          event.preventDefault();
-          setFocusedAddNewBlockSearch(true);
-          searchTextInputRef?.current?.focus();
-        } else if (useV2AddNewBlock
-          && focusedAddNewBlockSearch
-          && onlyKeysPresent([KEY_CODE_ESCAPE], keyMapping)
-        ) {
-          event.preventDefault();
-          setFocusedAddNewBlockSearch(false);
-          searchTextInputRef?.current?.blur();
-        } else if (selectedBlock) {
+          if (selectedBlock) {
           const selectedBlockIndex =
             blocks.findIndex(({ uuid }: BlockType) => selectedBlock.uuid === uuid);
 
@@ -1032,12 +1041,12 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
           setHiddenBlocks={setHiddenBlocks}
           setMountedBlocks={setMountedBlocks}
           setOutputBlocks={setOutputBlocks}
+          setScrollTogether={setScrollTogether}
           setSelected={(value: boolean) => setSelectedBlock(value === true ? block : null)}
           setSelectedBlock={setSelectedBlock}
           setSelectedOutputBlock={setSelectedOutputBlock}
-          setTextareaFocused={setTextareaFocused}
-          setScrollTogether={setScrollTogether}
           setSideBySideEnabled={setSideBySideEnabled}
+          setTextareaFocused={setTextareaFocused}
           showBlockBrowserModal={showBlockBrowserModal}
           showBrowseTemplates={showBrowseTemplates}
           showConfigureProjectModal={showConfigureProjectModal}
@@ -1060,7 +1069,7 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
               {addNewBlocksMemo}
             </div>
           )}
-        </CodeBlock>
+        </CodeBlock>,
       );
     });
 
@@ -1230,18 +1239,6 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
       }
   }, [addBlockFromFilePath]);
 
-  const {
-    browser: fileBrowser,
-  } = useFileComponents({
-    disableContextMenu: true,
-    onOpenFile,
-    onSelectBlockFile,
-    query: {
-      pattern: encodeURIComponent('\\.sql$'),
-    },
-    uuid: 'FileSelectorPopup/dbt',
-  });
-
   return (
     <DndProvider backend={HTML5Backend}>
       <PipelineContainerStyle ref={containerRef}>
@@ -1302,9 +1299,7 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
             dbtModelName={dbtModelName}
             onClose={closeAddDBTModelPopup}
             setDbtModelName={setDbtModelName}
-          >
-            {fileBrowser}
-          </FileSelectorPopup>
+          />
         </ClickOutside>
       )}
     </DndProvider>

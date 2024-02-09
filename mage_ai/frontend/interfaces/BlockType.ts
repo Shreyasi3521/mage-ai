@@ -74,6 +74,11 @@ export const SIDEKICK_BLOCK_TYPES = [
   BlockTypeEnum.EXTENSION,
 ];
 
+export const ADD_ON_BLOCK_TYPES = [
+  BlockTypeEnum.CALLBACK,
+  BlockTypeEnum.CONDITIONAL,
+];
+
 export enum BlockColorEnum {
   BLUE = 'blue',
   GREY = 'grey',
@@ -88,19 +93,23 @@ export const BLOCK_TYPES = [
   BlockTypeEnum.CUSTOM,
   BlockTypeEnum.DATA_EXPORTER,
   BlockTypeEnum.DATA_LOADER,
+  BlockTypeEnum.DBT,
+  BlockTypeEnum.MARKDOWN,
   BlockTypeEnum.SCRATCHPAD,
   BlockTypeEnum.SENSOR,
-  BlockTypeEnum.MARKDOWN,
   BlockTypeEnum.TRANSFORMER,
 ];
 
 export const DRAGGABLE_BLOCK_TYPES = [
+  BlockTypeEnum.CALLBACK,
+  BlockTypeEnum.CONDITIONAL,
   BlockTypeEnum.CUSTOM,
   BlockTypeEnum.DATA_EXPORTER,
   BlockTypeEnum.DATA_LOADER,
+  BlockTypeEnum.DBT,
+  BlockTypeEnum.MARKDOWN,
   BlockTypeEnum.SCRATCHPAD,
   BlockTypeEnum.SENSOR,
-  BlockTypeEnum.MARKDOWN,
   BlockTypeEnum.TRANSFORMER,
 ];
 
@@ -158,6 +167,7 @@ export interface SampleDataType {
 }
 
 export interface OutputType {
+  multi_output?: boolean;
   sample_data: SampleDataType;
   shape: number[];
   text_data: string;
@@ -247,8 +257,11 @@ export interface BlockRequestPayloadType {
 export interface BlockPipelineType {
   added_at?: string;
   pipeline: {
+    created_at?: string;
     description?: string;
     name: string;
+    tags?: string[];
+    repo_path?: string;
     type: string;
     updated_at: string;
     uuid: string;

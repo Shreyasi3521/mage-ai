@@ -54,6 +54,7 @@ import {
   CommandCenterActionRequestType,
   CommandCenterActionType,
   CommandCenterItemType,
+  CommandCenterStateEnum,
   ItemApplicationType,
   ItemApplicationTypeEnum,
   ItemTypeEnum,
@@ -64,7 +65,10 @@ import {
   getButtonLabel,
   ApplicationExpansionUUIDEnum,
 } from '@interfaces/CommandCenterType';
-import { CUSTOM_EVENT_NAME_COMMAND_CENTER_OPEN } from '@utils/events/constants';
+import {
+  CUSTOM_EVENT_NAME_COMMAND_CENTER_OPEN,
+  CUSTOM_EVENT_NAME_COMMAND_CENTER_STATE_CHANGED,
+} from '@utils/events/constants';
 import {
   KEY_CODE_ARROW_DOWN,
   KEY_CODE_ARROW_LEFT,
@@ -113,8 +117,12 @@ import { sum } from '@utils/array';
 import { useError } from '@context/Error';
 import { useKeyboardContext } from '@context/Keyboard';
 
-function CommandCenter() {
-  const router = useRouter();
+function CommandCenter({
+  router: routerProp,
+}: {
+  router?: any;
+}) {
+  const router = routerProp || useRouter();
   const [showError, _, refError] = useError(null, {}, [], {
     uuid: COMPONENT_UUID,
   });
@@ -306,7 +314,6 @@ function CommandCenter() {
     } = {
       skipAdding: false,
     }) {
-
     const currentApplicationConfig = { ...applicationConfiguration };
 
     if (!opts?.skipAdding) {
@@ -372,6 +379,7 @@ function CommandCenter() {
           {...currentApplicationConfig}
           applicationState={refApplicationState}
           applicationsRef={refApplications}
+          closeCommandCenter={closeCommandCenter}
           fetchItems={fetchItems}
           getItemsActionResults={getItemsActionResults}
           handleSelectItemRow={handleSelectItemRow}
@@ -419,6 +427,7 @@ function CommandCenter() {
         {...currentApplicationConfig}
         applicationState={refApplicationState}
         applicationsRef={refApplications}
+        closeCommandCenter={closeCommandCenter}
         closeOutput={closeOutput}
         fetchItems={fetchItems}
         getItemsActionResults={getItemsActionResults}
@@ -804,6 +813,7 @@ function CommandCenter() {
 
   const executeAction = useExecuteActions({
     applicationState: refApplicationState,
+    closeCommandCenter,
     commandCenterState: commandCenterStateRef,
     fetchItems,
     getItems,
@@ -1028,6 +1038,15 @@ function CommandCenter() {
     // Reset the items to the original list of items.
     stopLoading();
     abortRequests();
+
+    if (typeof window !== 'undefined') {
+      const eventCustom = new CustomEvent(CUSTOM_EVENT_NAME_COMMAND_CENTER_STATE_CHANGED, {
+        detail: {
+          state: CommandCenterStateEnum.CLOSED,
+        },
+      });
+      window.dispatchEvent(eventCustom);
+    }
   }
 
   function openCommandCenter() {
@@ -1052,6 +1071,15 @@ function CommandCenter() {
 
     stopLoading();
     abortRequests();
+
+    if (typeof window !== 'undefined') {
+      const eventCustom = new CustomEvent(CUSTOM_EVENT_NAME_COMMAND_CENTER_STATE_CHANGED, {
+        detail: {
+          state: CommandCenterStateEnum.OPEN,
+        },
+      });
+      window.dispatchEvent(eventCustom);
+    }
   }
 
   const {
@@ -1073,7 +1101,7 @@ function CommandCenter() {
 
   registerOnKeyDown(COMPONENT_UUID, (event, keyMapping, keyHistory) => {
     function startSequenceValid(): boolean {
-      const ks = getSetSettings(refSettings?.current || {})?.interface?.keyboard_shortcuts?.main;
+      const ks = getSetSettings(refSettings?.current || {})?.interface?.keyboard_shortcuts?.main?.filter(k => k?.length >= 1);
 
       if (ks?.length >= 1) {
         return ks?.every(k => keyMapping?.[k]);
@@ -1099,7 +1127,13 @@ function CommandCenter() {
       } else {
         openCommandCenter();
       }
-    } else if (refOutputContainerState?.current
+    }
+
+    if (!refActive?.current) {
+      return;
+    }
+
+    if (refOutputContainerState?.current
       && onlyKeysPresent([KEY_CODE_CONTROL, KEY_CODE_C], keyMapping, { allowExtraKeys: 0 })
     ) {
       // Close the output
@@ -1133,6 +1167,7 @@ function CommandCenter() {
 
               return executeButtonActions({
                 ...currentApplicationConfig,
+                closeCommandCenter,
                 button,
                 fetchItems,
                 getItemsActionResults,
@@ -1172,10 +1207,10 @@ function CommandCenter() {
           }
 
           // Reset the items to the original list of items.
-          renderItems(refItemsInit?.current || []);
+          return renderItems(refItemsInit?.current || []);
         } else {
           // If there is no text in the input, close.
-          closeCommandCenter();
+          return closeCommandCenter();
         }
       } else if (onlyKeysPresent([KEY_CODE_ENTER], keyMapping, { allowExtraKeys: 0 })
         && focusedItemIndex !== null
@@ -1183,7 +1218,7 @@ function CommandCenter() {
       ) {
         pauseEvent(event);
         // Pressing enter on an item
-        handleSelectItemRow(refItems?.current?.[focusedItemIndex], focusedItemIndex);
+        return handleSelectItemRow(refItems?.current?.[focusedItemIndex], focusedItemIndex);
       } else if (
         onlyKeysPresent([KEY_CODE_BACKSPACE], keyMapping, { allowExtraKeys: 0 })
           || onlyKeysPresent([KEY_CODE_DELETE], keyMapping, { allowExtraKeys: 0 })
@@ -1191,6 +1226,7 @@ function CommandCenter() {
         if (refSelectedSearchHistoryIndex?.current !== null) {
           refSelectedSearchHistoryIndex.current = null;
         }
+
         if (refFocusedSearchHistoryIndex?.current !== null) {
           refFocusedSearchHistoryIndex.current = null;
         }
@@ -1249,7 +1285,7 @@ function CommandCenter() {
         }
 
         if (index !== null) {
-          handleNavigation(index);
+          return handleNavigation(index);
         }
       }
     }
@@ -1262,18 +1298,33 @@ function CommandCenter() {
     if (refReload?.current === null) {
       setReload(prev => prev === null ? 0 : prev + 1);
     }
+
+    if (typeof window !== 'undefined') {
+      const eventCustom = new CustomEvent(CUSTOM_EVENT_NAME_COMMAND_CENTER_STATE_CHANGED, {
+        detail: {
+          state: CommandCenterStateEnum.MOUNTED,
+        },
+      });
+      window.dispatchEvent(eventCustom);
+    }
   }, []);
 
   useEffect(() => {
     if (reload !== null) {
       renderItems(getCachedItems(), { shouldFilter: true });
-      fetchItems();
+      fetchItems({
+        delay: 5000,
+      });
       refReload.current = (refReload?.current || 0) + 1;
     }
   }, [reload]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
+      if (!refActive?.current) {
+        return;
+      }
+
       let isOutside = true;
       // @ts-ignore
       if (refContainer?.current) {

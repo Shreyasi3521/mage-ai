@@ -16,6 +16,7 @@ from mage_ai.settings.platform import project_platform_activated
 from mage_ai.settings.repo import get_repo_path, get_variables_dir
 from mage_ai.shared.constants import GCS_PREFIX, S3_PREFIX
 from mage_ai.shared.dates import str_to_timedelta
+from mage_ai.shared.environments import is_debug
 from mage_ai.shared.utils import clean_name
 
 
@@ -64,7 +65,7 @@ class VariableManager:
             variable_type = VariableType.GEO_DATAFRAME
         variable = Variable(
             clean_name(variable_uuid),
-            self.__pipeline_path(pipeline_uuid),
+            self.pipeline_path(pipeline_uuid),
             block_uuid,
             partition=partition,
             storage=self.storage,
@@ -76,6 +77,12 @@ class VariableManager:
         variable.delete()
         variable.variable_type = variable_type
         variable.write_data(data)
+        if is_debug():
+            print(
+                f'Variable {variable_uuid} ({variable_type or "no type"}) for block {block_uuid} '
+                f'in pipeline {pipeline_uuid} '
+                f'stored in {variable.variable_path}'
+            )
 
     def build_variable(
         self,
@@ -88,7 +95,7 @@ class VariableManager:
     ) -> Variable:
         return Variable(
             clean_name(variable_uuid) if clean_variable_uuid else variable_uuid,
-            self.__pipeline_path(pipeline_uuid),
+            self.pipeline_path(pipeline_uuid),
             block_uuid,
             partition=partition,
             storage=self.storage,
@@ -113,7 +120,7 @@ class VariableManager:
             variable_type = VariableType.GEO_DATAFRAME
         variable = Variable(
             clean_name(variable_uuid),
-            self.__pipeline_path(pipeline_uuid),
+            self.pipeline_path(pipeline_uuid),
             block_uuid,
             partition=partition,
             storage=self.storage,
@@ -146,7 +153,7 @@ class VariableManager:
         for pipeline_uuid in pipeline_uuids:
             print(f'Removing cached variables from pipeline {pipeline_uuid}')
             pipeline_variable_path = os.path.join(
-                self.__pipeline_path(pipeline_uuid),
+                self.pipeline_path(pipeline_uuid),
                 VARIABLE_DIR,
             )
             dirs = self.storage.listdir(pipeline_variable_path)
@@ -176,7 +183,7 @@ class VariableManager:
     ) -> None:
         Variable(
             variable_uuid,
-            self.__pipeline_path(pipeline_uuid),
+            self.pipeline_path(pipeline_uuid),
             block_uuid,
             partition=partition,
             storage=self.storage,
@@ -229,7 +236,7 @@ class VariableManager:
             variable_type = VariableType.SPARK_DATAFRAME
         return Variable(
             variable_uuid,
-            self.__pipeline_path(pipeline_uuid),
+            self.pipeline_path(pipeline_uuid),
             block_uuid,
             partition=partition,
             spark=spark,
@@ -241,7 +248,7 @@ class VariableManager:
     def get_variables_by_pipeline(self, pipeline_uuid: str) -> Dict[str, List[str]]:
         from mage_ai.data_preparation.models.pipeline import Pipeline
         pipeline = Pipeline.get(pipeline_uuid, repo_path=self.repo_path)
-        variable_dir_path = os.path.join(self.__pipeline_path(pipeline_uuid), VARIABLE_DIR)
+        variable_dir_path = os.path.join(self.pipeline_path(pipeline_uuid), VARIABLE_DIR)
         if not self.storage.path_exists(variable_dir_path):
             return dict()
         block_dirs = self.storage.listdir(variable_dir_path)
@@ -266,7 +273,7 @@ class VariableManager:
         clean_block_uuid: bool = True,
     ) -> List[str]:
         variable_dir_path = os.path.join(
-            self.__pipeline_path(pipeline_uuid),
+            self.pipeline_path(pipeline_uuid),
             VARIABLE_DIR,
             partition or '',
             clean_name(block_uuid) if clean_block_uuid else block_uuid,
@@ -276,7 +283,7 @@ class VariableManager:
         variables = self.storage.listdir(variable_dir_path)
         return sorted([v.split('.')[0] for v in variables])
 
-    def __pipeline_path(self, pipeline_uuid: str) -> str:
+    def pipeline_path(self, pipeline_uuid: str) -> str:
         path = os.path.join(self.variables_dir, 'pipelines', pipeline_uuid)
         if type(self.storage) is LocalStorage:
             if not self.storage.path_exists(path):

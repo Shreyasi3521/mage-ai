@@ -23,7 +23,7 @@ pendulum==2.1.0
 protobuf>=4.0.0
 psycopg2==2.9.3
 psycopg2-binary==2.9.3
-pyarrow==10.0.1
+pyarrow==14.0.1
 pymongo==4.3.3
 pymongo_schema==0.4.1
 python-dateutil==2.8.2
@@ -34,7 +34,7 @@ requests_mock==1.10.0
 simple_salesforce~=1.12.5
 simplejson
 singer_sdk~=0.34.1
-snowflake-connector-python==3.2.1
+snowflake-connector-python==3.4.0
 sshtunnel==0.4.0
 stripe==5.5.0
 terminaltables==3.1.10

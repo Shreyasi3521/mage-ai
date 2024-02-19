@@ -18,7 +18,7 @@ setuptools.setup(
     name='mage-ai',
     # NOTE: when you change this, change the value of VERSION in the following file:
     # mage_ai/server/constants.py
-    version='0.9.63',
+    version='0.9.64',
     author='Mage',
     author_email='eng@mage.ai',
     description='Mage is a tool for building and deploying data pipelines.',
@@ -43,6 +43,7 @@ setuptools.setup(
         'ai': [
             'astor>=0.8.1',
             'langchain>=0.0.222',
+            'langchain_community<0.0.20',
             'openai>=0.27.8, <1.0.0',
         ],
         'azure': [
@@ -166,6 +167,7 @@ setuptools.setup(
             'kafka-python==2.0.2',
             'kubernetes>=28.1.0',
             'langchain>=0.0.222',
+            'langchain_community<0.0.20',
             'ldap3==2.9.1',
             'nats-py==2.6.0',
             'nkeys~=0.1.0',

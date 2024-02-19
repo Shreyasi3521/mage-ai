@@ -19,6 +19,8 @@ class GitlabProvider(OauthProvider):
 
     def __init__(self):
         self.hostname = GITLAB_HOST or 'https://gitlab.com'
+        if not self.hostname.startswith('http'):
+            self.hostname = f'https://{self.hostname}'
         self.client_id = GITLAB_CLIENT_ID
         self.client_secret = GITLAB_CLIENT_SECRET
         self.__validate()
@@ -45,8 +47,8 @@ class GitlabProvider(OauthProvider):
                 f'{base_url}/oauth',
             ),
             response_type='code',
-            state=uuid.uuid4().hex,
             scope='read_user+write_repository+api',
+            state=uuid.uuid4().hex,
         )
         query_strings = []
         for k, v in query.items():

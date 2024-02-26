@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import os
 import shutil
@@ -288,7 +289,7 @@ class Pipeline:
             return ret_file, pipeline_config
 
     @classmethod
-    def duplicate(
+    async def duplicate(
         cls,
         source_pipeline: 'Pipeline',
         duplicate_pipeline_name: str = None,
@@ -323,6 +324,21 @@ class Pipeline:
             duplicate_pipeline.config_path,
             yaml.dump(duplicate_pipeline_dict)
         )
+
+        tags = duplicate_pipeline_dict.get('tags')
+        blocks = duplicate_pipeline_dict.get('blocks')
+        if tags:
+            from mage_ai.cache.tag import TagCache
+
+            tag_cache = await TagCache.initialize_cache()
+            for tag_uuid in tags:
+                tag_cache.add_pipeline(tag_uuid, duplicate_pipeline)
+        if blocks:
+            from mage_ai.cache.block import BlockCache
+
+            block_cache = await BlockCache.initialize_cache()
+            for block in blocks:
+                block_cache.add_pipeline(block, duplicate_pipeline)
 
         return cls.get(
             duplicate_pipeline_uuid,
@@ -973,6 +989,8 @@ class Pipeline:
         )
 
         old_uuid = None
+        blocks_to_remove_from_cache = []
+        block_uuids_to_add_to_cache = []
         should_update_block_cache = False
         should_update_tag_cache = False
 
@@ -1205,12 +1223,25 @@ class Pipeline:
                             cache_block_action_object = \
                                 await BlockActionObjectCache.initialize_cache()
                         cache_block_action_object.update_block(block, remove=True)
+
+                        block_update_payload = extract(block_data, ['name'])
+                        configuration = copy.deepcopy(block_data).get('configuration', {})
+                        file_path = (configuration.get('file_source') or {}).get('path')
+                        if file_path:
+                            # Check for block name with period to avoid replacing a directory name
+                            new_file_path = file_path.replace(f'{block.name}.', f'{name}.')
+                            configuration['file_source']['path'] = new_file_path
+                            block_update_payload['configuration'] = configuration
+                        blocks_to_remove_from_cache.append(block.to_dict())
                         block.update(
-                            extract(block_data, ['name']),
+                            block_update_payload,
                             detach=block_data.get('detach', False)
                         )
+
+                        block_uuids_to_add_to_cache.append(block.uuid)
                         cache_block_action_object.update_block(block)
                         block_uuid_mapping[block_data.get('uuid')] = block.uuid
+                        should_update_block_cache = True
                         should_save_async = should_save_async or True
 
                 if should_save_async:
@@ -1241,10 +1272,24 @@ class Pipeline:
 
             cache = await BlockCache.initialize_cache()
 
+            for block_dict in blocks_to_remove_from_cache:
+                cache.remove_pipeline(
+                    block_dict,
+                    self.uuid,
+                    self.repo_path,
+                )
+
             for block in self.blocks_by_uuid.values():
+                if block_uuids_to_add_to_cache and block.uuid not in block_uuids_to_add_to_cache:
+                    continue
+
                 if old_uuid:
-                    cache.remove_pipeline(block, old_uuid, self.repo_path)
-                cache.update_pipeline(block, self)
+                    cache.remove_pipeline(
+                        block.to_dict(),
+                        old_uuid,
+                        self.repo_path,
+                    )
+                cache.update_pipeline(block.to_dict(), self)
 
         if should_update_tag_cache:
             from mage_ai.cache.tag import TagCache

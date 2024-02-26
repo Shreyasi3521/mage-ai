@@ -179,16 +179,19 @@ WHERE TABLE_NAME = '{table_name}' AND TABLE_SCHEMA = '{schema_name}'
             ]
 
         if not self.is_redshift_serverless:
+            # commands.append(
+            #     '\n'.join([
+            #         'WITH last_queryid_for_table AS (',
+            #         '    SELECT query, MAX(si.starttime) OVER () as last_q_stime, si.starttime as stime',  # noqa: E501
+            #         '    FROM stl_insert si, SVV_TABLE_INFO sti',
+            #         f'    WHERE sti.table_id=si.tbl AND sti."table"=\'{table_name}\'',
+            #         ')',
+            #         'SELECT SUM(rows) FROM stl_insert si, last_queryid_for_table lqt ',
+            #         'WHERE si.query=lqt.query AND lqt.last_q_stime=stime',
+            #     ])
+            # )
             commands.append(
-                '\n'.join([
-                    'WITH last_queryid_for_table AS (',
-                    '    SELECT query, MAX(si.starttime) OVER () as last_q_stime, si.starttime as stime',  # noqa: E501
-                    '    FROM stl_insert si, SVV_TABLE_INFO sti',
-                    f'    WHERE sti.table_id=si.tbl AND sti."table"=\'{table_name}\'',
-                    ')',
-                    'SELECT SUM(rows) FROM stl_insert si, last_queryid_for_table lqt ',
-                    'WHERE si.query=lqt.query AND lqt.last_q_stime=stime',
-                ])
+                f'SELECT {len(records)} AS row_count'
             )
         else:
             # stl_insert table is not supported in Redshift Serverless
